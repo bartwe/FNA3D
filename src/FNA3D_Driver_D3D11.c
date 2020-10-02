@@ -82,7 +82,6 @@ typedef struct D3D11Texture /* Cast FNA3D_Texture* to this! */
 	/* D3D Handles */
 	ID3D11Resource *handle; /* ID3D11Texture2D or ID3D11Texture3D */
 	ID3D11ShaderResourceView *shaderView;
-	ID3D11Resource *staging; /* ID3D11Texture2D or ID3D11Texture3D */
 
 	/* Basic Info */
 	int32_t levelCount;
@@ -111,11 +110,11 @@ typedef struct D3D11Texture /* Cast FNA3D_Texture* to this! */
 			ID3D11RenderTargetView **rtViews;
 		} cube;
 	};
+	ID3D11Resource *staging; /* ID3D11Texture2D or ID3D11Texture3D */
 } D3D11Texture;
 
 static D3D11Texture NullTexture =
 {
-	NULL,
 	NULL,
 	NULL,
 	1,
@@ -124,7 +123,8 @@ static D3D11Texture NullTexture =
 	0,
 	{
 		{ 0, 0 }
-	}
+	},
+	NULL
 };
 
 typedef struct D3D11Renderbuffer /* Cast FNA3D_Renderbuffer* to this! */
@@ -155,7 +155,6 @@ typedef struct D3D11Buffer /* Cast FNA3D_Buffer* to this! */
 	ID3D11Buffer *handle;
 	uint8_t dynamic;
 	int32_t size;
-	ID3D11Buffer *staging;
 } D3D11Buffer;
 
 typedef struct D3D11Effect /* Cast FNA3D_Effect* to this! */
@@ -167,28 +166,6 @@ typedef struct D3D11Query /* Cast FNA3D_Query* to this! */
 {
 	ID3D11Query *handle;
 } D3D11Query;
-
-typedef struct D3D11Backbuffer
-{
-	int32_t width;
-	int32_t height;
-
-	/* Color */
-	FNA3D_SurfaceFormat surfaceFormat;
-	ID3D11Texture2D *colorBuffer;
-	ID3D11RenderTargetView *colorView;
-	ID3D11ShaderResourceView *shaderView;
-	ID3D11Texture2D *stagingBuffer;
-
-	/* Depth Stencil */
-	FNA3D_DepthFormat depthFormat;
-	ID3D11Texture2D *depthStencilBuffer;
-	ID3D11DepthStencilView *depthStencilView;
-
-	/* Multisample */
-	int32_t multiSampleCount;
-	ID3D11Texture2D *resolveBuffer;
-} D3D11Backbuffer;
 
 typedef struct D3D11Renderer /* Cast FNA3D_Renderer* to this! */
 {
@@ -204,7 +181,27 @@ typedef struct D3D11Renderer /* Cast FNA3D_Renderer* to this! */
 	SDL_mutex *ctxLock;
 
 	/* The Faux-Backbuffer */
-	D3D11Backbuffer *backbuffer;
+	struct
+	{
+		int32_t width;
+		int32_t height;
+
+		/* Color */
+		FNA3D_SurfaceFormat surfaceFormat;
+		ID3D11Texture2D *colorBuffer;
+		ID3D11RenderTargetView *colorView;
+		ID3D11ShaderResourceView *shaderView;
+		ID3D11Texture2D *stagingBuffer;
+
+		/* Depth Stencil */
+		FNA3D_DepthFormat depthFormat;
+		ID3D11Texture2D *depthStencilBuffer;
+		ID3D11DepthStencilView *depthStencilView;
+
+		/* Multisample */
+		int32_t multiSampleCount;
+		ID3D11Texture2D *resolveBuffer;
+	} backbuffer;
 	uint8_t backbufferSizeChanged;
 	FNA3D_Rect prevSrcRect;
 	FNA3D_Rect prevDstRect;
@@ -1080,8 +1077,8 @@ static void D3D11_INTERNAL_UpdateBackbufferVertexBuffer(
 	int32_t drawableWidth,
 	int32_t drawableHeight
 ) {
-	float backbufferWidth = (float) renderer->backbuffer->width;
-	float backbufferHeight = (float) renderer->backbuffer->height;
+	float backbufferWidth = (float) renderer->backbuffer.width;
+	float backbufferHeight = (float) renderer->backbuffer.height;
 	float sx0, sy0, sx1, sy1;
 	float dx0, dy0, dx1, dy1;
 	float data[16];
@@ -1275,7 +1272,7 @@ static void D3D11_INTERNAL_BlitFramebuffer(
 		renderer->context,
 		0,
 		1,
-		&renderer->backbuffer->shaderView
+		&renderer->backbuffer.shaderView
 	);
 	ID3D11DeviceContext_PSSetSamplers(
 		renderer->context,
@@ -1411,8 +1408,8 @@ static void D3D11_SwapBuffers(
 	{
 		srcRect.x = 0;
 		srcRect.y = 0;
-		srcRect.w = renderer->backbuffer->width;
-		srcRect.h = renderer->backbuffer->height;
+		srcRect.w = renderer->backbuffer.width;
+		srcRect.h = renderer->backbuffer.height;
 	}
 	if (destinationRectangle != NULL)
 	{
@@ -1452,15 +1449,15 @@ static void D3D11_SwapBuffers(
 	SDL_LockMutex(renderer->ctxLock);
 
 	/* Resolve the faux-backbuffer if needed */
-	if (renderer->backbuffer->multiSampleCount > 1)
+	if (renderer->backbuffer.multiSampleCount > 1)
 	{
 		ID3D11DeviceContext_ResolveSubresource(
 			renderer->context,
-			(ID3D11Resource*) renderer->backbuffer->resolveBuffer,
+			(ID3D11Resource*) renderer->backbuffer.resolveBuffer,
 			0,
-			(ID3D11Resource*) renderer->backbuffer->colorBuffer,
+			(ID3D11Resource*) renderer->backbuffer.colorBuffer,
 			0,
-			XNAToD3D_TextureFormat[renderer->backbuffer->surfaceFormat]
+			XNAToD3D_TextureFormat[renderer->backbuffer.surfaceFormat]
 		);
 	}
 
@@ -2108,9 +2105,9 @@ static void D3D11_SetRenderTargets(
 	/* Bind the backbuffer, if applicable */
 	if (renderTargets == NULL)
 	{
-		renderer->renderTargetViews[0] = renderer->backbuffer->colorView;
-		renderer->currentDepthFormat = renderer->backbuffer->depthFormat;
-		renderer->depthStencilView = renderer->backbuffer->depthStencilView;
+		renderer->renderTargetViews[0] = renderer->backbuffer.colorView;
+		renderer->currentDepthFormat = renderer->backbuffer.depthFormat;
+		renderer->depthStencilView = renderer->backbuffer.depthStencilView;
 		renderer->numRenderTargets = 1;
 		SDL_LockMutex(renderer->ctxLock);
 		ID3D11DeviceContext_OMSetRenderTargets(
@@ -2260,29 +2257,29 @@ static void D3D11_INTERNAL_CreateFramebuffer(
 	/* Update the backbuffer size */
 	w = presentationParameters->backBufferWidth;
 	h = presentationParameters->backBufferHeight;
-	if (BB->width != w || BB->height != h)
+	if (BB.width != w || BB.height != h)
 	{
 		renderer->backbufferSizeChanged = 1;
 	}
-	BB->width = w;
-	BB->height = h;
+	BB.width = w;
+	BB.height = h;
 
 	/* Update other presentation parameters */
-	BB->surfaceFormat = presentationParameters->backBufferFormat;
-	BB->depthFormat = presentationParameters->depthStencilFormat;
-	BB->multiSampleCount = presentationParameters->multiSampleCount;
+	BB.surfaceFormat = presentationParameters->backBufferFormat;
+	BB.depthFormat = presentationParameters->depthStencilFormat;
+	BB.multiSampleCount = presentationParameters->multiSampleCount;
 
 	/* Update color buffer to the new resolution */
-	colorBufferDesc.Width = BB->width;
-	colorBufferDesc.Height = BB->height;
+	colorBufferDesc.Width = BB.width;
+	colorBufferDesc.Height = BB.height;
 	colorBufferDesc.MipLevels = 1;
 	colorBufferDesc.ArraySize = 1;
-	colorBufferDesc.Format = XNAToD3D_TextureFormat[BB->surfaceFormat];
-	colorBufferDesc.SampleDesc.Count = (BB->multiSampleCount > 1 ? BB->multiSampleCount : 1);
+	colorBufferDesc.Format = XNAToD3D_TextureFormat[BB.surfaceFormat];
+	colorBufferDesc.SampleDesc.Count = (BB.multiSampleCount > 1 ? BB.multiSampleCount : 1);
 	colorBufferDesc.SampleDesc.Quality = 0;
 	colorBufferDesc.Usage = D3D11_USAGE_DEFAULT;
 	colorBufferDesc.BindFlags = D3D11_BIND_RENDER_TARGET;
-	if (BB->multiSampleCount <= 1)
+	if (BB.multiSampleCount <= 1)
 	{
 		colorBufferDesc.BindFlags |= D3D11_BIND_SHADER_RESOURCE;
 	}
@@ -2292,13 +2289,13 @@ static void D3D11_INTERNAL_CreateFramebuffer(
 		renderer->device,
 		&colorBufferDesc,
 		NULL,
-		&BB->colorBuffer
+		&BB.colorBuffer
 	);
 	ERROR_CHECK_RETURN("Backbuffer color buffer creation failed",)
 
 	/* Update color buffer view */
 	colorViewDesc.Format = colorBufferDesc.Format;
-	if (BB->multiSampleCount > 1)
+	if (BB.multiSampleCount > 1)
 	{
 		colorViewDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2DMS;
 	}
@@ -2309,20 +2306,20 @@ static void D3D11_INTERNAL_CreateFramebuffer(
 	}
 	res = ID3D11Device_CreateRenderTargetView(
 		renderer->device,
-		(ID3D11Resource*) BB->colorBuffer,
+		(ID3D11Resource*) BB.colorBuffer,
 		&colorViewDesc,
-		&BB->colorView
+		&BB.colorView
 	);
 	ERROR_CHECK_RETURN("Backbuffer color buffer RT view creation failed",)
 
 	/* Update resolve texture, if applicable */
-	if (BB->multiSampleCount > 1)
+	if (BB.multiSampleCount > 1)
 	{
-		colorBufferDesc.Width = BB->width;
-		colorBufferDesc.Height = BB->height;
+		colorBufferDesc.Width = BB.width;
+		colorBufferDesc.Height = BB.height;
 		colorBufferDesc.MipLevels = 1;
 		colorBufferDesc.ArraySize = 1;
-		colorBufferDesc.Format = XNAToD3D_TextureFormat[BB->surfaceFormat];
+		colorBufferDesc.Format = XNAToD3D_TextureFormat[BB.surfaceFormat];
 		colorBufferDesc.SampleDesc.Count = 1;
 		colorBufferDesc.SampleDesc.Quality = 0;
 		colorBufferDesc.Usage = D3D11_USAGE_DEFAULT;
@@ -2333,7 +2330,7 @@ static void D3D11_INTERNAL_CreateFramebuffer(
 			renderer->device,
 			&colorBufferDesc,
 			NULL,
-			&BB->resolveBuffer
+			&BB.resolveBuffer
 		);
 		ERROR_CHECK_RETURN("Backbuffer multisample resolve buffer creation failed",)
 	}
@@ -2345,21 +2342,21 @@ static void D3D11_INTERNAL_CreateFramebuffer(
 	shaderViewDesc.Texture2D.MostDetailedMip = 0;
 	res = ID3D11Device_CreateShaderResourceView(
 		renderer->device,
-		(ID3D11Resource*) ((BB->multiSampleCount > 1) ? BB->resolveBuffer : BB->colorBuffer),
+		(ID3D11Resource*) ((BB.multiSampleCount > 1) ? BB.resolveBuffer : BB.colorBuffer),
 		&shaderViewDesc,
-		&renderer->backbuffer->shaderView
+		&BB.shaderView
 	);
 	ERROR_CHECK_RETURN("Backbuffer shader view creation failed",)
 
 	/* Update the depth/stencil buffer, if applicable */
-	if (BB->depthFormat != FNA3D_DEPTHFORMAT_NONE)
+	if (BB.depthFormat != FNA3D_DEPTHFORMAT_NONE)
 	{
-		depthStencilDesc.Width = BB->width;
-		depthStencilDesc.Height = BB->height;
+		depthStencilDesc.Width = BB.width;
+		depthStencilDesc.Height = BB.height;
 		depthStencilDesc.MipLevels = 1;
 		depthStencilDesc.ArraySize = 1;
-		depthStencilDesc.Format = XNAToD3D_DepthFormat[BB->depthFormat];
-		depthStencilDesc.SampleDesc.Count = (BB->multiSampleCount > 1 ? BB->multiSampleCount : 1);
+		depthStencilDesc.Format = XNAToD3D_DepthFormat[BB.depthFormat];
+		depthStencilDesc.SampleDesc.Count = (BB.multiSampleCount > 1 ? BB.multiSampleCount : 1);
 		depthStencilDesc.SampleDesc.Quality = 0;
 		depthStencilDesc.Usage = D3D11_USAGE_DEFAULT;
 		depthStencilDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
@@ -2369,14 +2366,14 @@ static void D3D11_INTERNAL_CreateFramebuffer(
 			renderer->device,
 			&depthStencilDesc,
 			NULL,
-			&BB->depthStencilBuffer
+			&BB.depthStencilBuffer
 		);
 		ERROR_CHECK_RETURN("Backbuffer depth-stencil buffer creation failed",)
 
 		/* Update the depth-stencil view */
 		depthStencilViewDesc.Format = depthStencilDesc.Format;
 		depthStencilViewDesc.Flags = 0;
-		if (BB->multiSampleCount > 1)
+		if (BB.multiSampleCount > 1)
 		{
 			depthStencilViewDesc.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2DMS;
 		}
@@ -2388,9 +2385,9 @@ static void D3D11_INTERNAL_CreateFramebuffer(
 		}
 		res = ID3D11Device_CreateDepthStencilView(
 			renderer->device,
-			(ID3D11Resource*) BB->depthStencilBuffer,
+			(ID3D11Resource*) BB.depthStencilBuffer,
 			&depthStencilViewDesc,
-			&BB->depthStencilView
+			&BB.depthStencilView
 		);
 		ERROR_CHECK_RETURN("Backbuffer depth-stencil view creation failed",)
 	}
@@ -2456,37 +2453,37 @@ static void D3D11_INTERNAL_DestroyFramebuffer(D3D11Renderer *renderer)
 {
 	#define BB renderer->backbuffer
 
-	if (BB->colorBuffer != NULL)
+	if (BB.colorBuffer != NULL)
 	{
-		ID3D11RenderTargetView_Release(BB->colorView);
-		BB->colorView = NULL;
+		ID3D11RenderTargetView_Release(BB.colorView);
+		BB.colorView = NULL;
 
-		ID3D11ShaderResourceView_Release(BB->shaderView);
-		BB->shaderView = NULL;
+		ID3D11ShaderResourceView_Release(BB.shaderView);
+		BB.shaderView = NULL;
 
-		ID3D11Texture2D_Release(BB->colorBuffer);
-		BB->colorBuffer = NULL;
+		ID3D11Texture2D_Release(BB.colorBuffer);
+		BB.colorBuffer = NULL;
 	}
 
-	if (BB->stagingBuffer != NULL)
+	if (BB.stagingBuffer != NULL)
 	{
-		ID3D11Texture2D_Release(BB->stagingBuffer);
-		BB->stagingBuffer = NULL;
+		ID3D11Texture2D_Release(BB.stagingBuffer);
+		BB.stagingBuffer = NULL;
 	}
 
-	if (BB->depthStencilBuffer != NULL)
+	if (BB.depthStencilBuffer != NULL)
 	{
-		ID3D11DepthStencilView_Release(BB->depthStencilView);
-		BB->depthStencilView = NULL;
+		ID3D11DepthStencilView_Release(BB.depthStencilView);
+		BB.depthStencilView = NULL;
 
-		ID3D11Texture2D_Release(BB->depthStencilBuffer);
-		BB->depthStencilBuffer = NULL;
+		ID3D11Texture2D_Release(BB.depthStencilBuffer);
+		BB.depthStencilBuffer = NULL;
 	}
 
-	if (BB->resolveBuffer != NULL)
+	if (BB.resolveBuffer != NULL)
 	{
-		ID3D11Texture2D_Release(BB->resolveBuffer);
-		BB->resolveBuffer = NULL;
+		ID3D11Texture2D_Release(BB.resolveBuffer);
+		BB.resolveBuffer = NULL;
 	}
 
 	if (renderer->swapchainRTView != NULL)
@@ -2553,16 +2550,16 @@ static void D3D11_ReadBackbuffer(
 	D3D11Renderer *renderer = (D3D11Renderer*) driverData;
 	D3D11Texture backbufferTexture;
 
-	if (renderer->backbuffer->multiSampleCount > 1)
+	if (renderer->backbuffer.multiSampleCount > 1)
 	{
 		/* We have to resolve the backbuffer first. */
 		ID3D11DeviceContext_ResolveSubresource(
 			renderer->context,
-			(ID3D11Resource*) renderer->backbuffer->resolveBuffer,
+			(ID3D11Resource*) renderer->backbuffer.resolveBuffer,
 			0,
-			(ID3D11Resource*) renderer->backbuffer->colorBuffer,
+			(ID3D11Resource*) renderer->backbuffer.colorBuffer,
 			0,
-			XNAToD3D_TextureFormat[renderer->backbuffer->surfaceFormat]
+			XNAToD3D_TextureFormat[renderer->backbuffer.surfaceFormat]
 		);
 	}
 
@@ -2570,16 +2567,16 @@ static void D3D11_ReadBackbuffer(
 	 * These are the only members we need to initialize.
 	 * -caleb
 	 */
-	backbufferTexture.twod.width = renderer->backbuffer->width;
-	backbufferTexture.twod.height = renderer->backbuffer->height;
-	backbufferTexture.format = renderer->backbuffer->surfaceFormat;
+	backbufferTexture.twod.width = renderer->backbuffer.width;
+	backbufferTexture.twod.height = renderer->backbuffer.height;
+	backbufferTexture.format = renderer->backbuffer.surfaceFormat;
 	backbufferTexture.levelCount = 1;
 	backbufferTexture.handle = (
-		renderer->backbuffer->multiSampleCount > 1 ?
-			(ID3D11Resource*) renderer->backbuffer->resolveBuffer :
-			(ID3D11Resource*) renderer->backbuffer->colorBuffer
+		renderer->backbuffer.multiSampleCount > 1 ?
+			(ID3D11Resource*) renderer->backbuffer.resolveBuffer :
+			(ID3D11Resource*) renderer->backbuffer.colorBuffer
 	);
-	backbufferTexture.staging = (ID3D11Resource*) renderer->backbuffer->stagingBuffer;
+	backbufferTexture.staging = (ID3D11Resource*) renderer->backbuffer.stagingBuffer;
 
 	D3D11_GetTextureData2D(
 		driverData,
@@ -2600,26 +2597,26 @@ static void D3D11_GetBackbufferSize(
 	int32_t *h
 ) {
 	D3D11Renderer *renderer = (D3D11Renderer*) driverData;
-	*w = renderer->backbuffer->width;
-	*h = renderer->backbuffer->height;
+	*w = renderer->backbuffer.width;
+	*h = renderer->backbuffer.height;
 }
 
 static FNA3D_SurfaceFormat D3D11_GetBackbufferSurfaceFormat(
 	FNA3D_Renderer *driverData
 ) {
-	return ((D3D11Renderer*) driverData)->backbuffer->surfaceFormat;
+	return ((D3D11Renderer*) driverData)->backbuffer.surfaceFormat;
 }
 
 static FNA3D_DepthFormat D3D11_GetBackbufferDepthFormat(
 	FNA3D_Renderer *driverData
 ) {
-	return ((D3D11Renderer*) driverData)->backbuffer->depthFormat;
+	return ((D3D11Renderer*) driverData)->backbuffer.depthFormat;
 }
 
 static int32_t D3D11_GetBackbufferMultiSampleCount(
 	FNA3D_Renderer *driverData
 ) {
-	return ((D3D11Renderer*) driverData)->backbuffer->multiSampleCount;
+	return ((D3D11Renderer*) driverData)->backbuffer.multiSampleCount;
 }
 
 /* Textures */
@@ -3126,6 +3123,7 @@ static void D3D11_GetTextureData2D(
 	D3D11Renderer *renderer = (D3D11Renderer*) driverData;
 	D3D11Texture *tex = (D3D11Texture*) texture;
 	D3D11_TEXTURE2D_DESC stagingDesc;
+	ID3D11Resource *stagingTexture;
 	uint32_t subresourceIndex = D3D11_INTERNAL_CalcSubresource(
 		level,
 		0,
@@ -3151,7 +3149,15 @@ static void D3D11_GetTextureData2D(
 	}
 
 	/* Create staging texture if needed */
-	if (tex->staging == NULL)
+	if (tex->isRenderTarget)
+	{
+		stagingTexture = tex->staging;
+	}
+	else
+	{
+		stagingTexture = NULL;
+	}
+	if (stagingTexture == NULL)
 	{
 		stagingDesc.Width = tex->twod.width;
 		stagingDesc.Height = tex->twod.height;
@@ -3169,9 +3175,15 @@ static void D3D11_GetTextureData2D(
 			renderer->device,
 			&stagingDesc,
 			NULL,
-			(ID3D11Texture2D**) &tex->staging
+			(ID3D11Texture2D**) &stagingTexture
 		);
 		ERROR_CHECK_RETURN("Texture2D staging buffer creation failed",)
+
+		/* Targets will probably call this a lot, so try to keep this all the time */
+		if (tex->isRenderTarget)
+		{
+			tex->staging = stagingTexture;
+		}
 	}
 
 	SDL_LockMutex(renderer->ctxLock);
@@ -3179,7 +3191,7 @@ static void D3D11_GetTextureData2D(
 	/* Copy data into staging texture */
 	ID3D11DeviceContext_CopySubresourceRegion(
 		renderer->context,
-		tex->staging,
+		stagingTexture,
 		subresourceIndex,
 		0,
 		0,
@@ -3192,7 +3204,7 @@ static void D3D11_GetTextureData2D(
 	/* Read from the staging texture */
 	res = ID3D11DeviceContext_Map(
 		renderer->context,
-		tex->staging,
+		stagingTexture,
 		subresourceIndex,
 		D3D11_MAP_READ,
 		0,
@@ -3210,11 +3222,16 @@ static void D3D11_GetTextureData2D(
 	}
 	ID3D11DeviceContext_Unmap(
 		renderer->context,
-		tex->staging,
+		stagingTexture,
 		subresourceIndex
 	);
 
 	SDL_UnlockMutex(renderer->ctxLock);
+
+	if (!tex->isRenderTarget)
+	{
+		ID3D11Resource_Release(stagingTexture);
+	}
 }
 
 static void D3D11_GetTextureData3D(
@@ -3250,6 +3267,7 @@ static void D3D11_GetTextureDataCube(
 	D3D11Renderer *renderer = (D3D11Renderer*) driverData;
 	D3D11Texture *tex = (D3D11Texture*) texture;
 	D3D11_TEXTURE2D_DESC stagingDesc;
+	ID3D11Resource *stagingTexture;
 	uint32_t srcSubresourceIndex = D3D11_INTERNAL_CalcSubresource(
 		level,
 		cubeMapFace,
@@ -3279,7 +3297,15 @@ static void D3D11_GetTextureDataCube(
 	}
 
 	/* Create staging texture if needed */
-	if (tex->staging == NULL)
+	if (tex->isRenderTarget)
+	{
+		stagingTexture = tex->staging;
+	}
+	else
+	{
+		stagingTexture = NULL;
+	}
+	if (stagingTexture == NULL)
 	{
 		stagingDesc.Width = tex->cube.size;
 		stagingDesc.Height = tex->cube.size;
@@ -3297,9 +3323,15 @@ static void D3D11_GetTextureDataCube(
 			renderer->device,
 			&stagingDesc,
 			NULL,
-			(ID3D11Texture2D**) &tex->staging
+			(ID3D11Texture2D**) &stagingTexture
 		);
 		ERROR_CHECK_RETURN("TextureCube staging buffer creation failed",)
+
+		/* Targets will probably call this a lot, so try to keep this all the time */
+		if (tex->isRenderTarget)
+		{
+			tex->staging = stagingTexture;
+		}
 	}
 
 	SDL_LockMutex(renderer->ctxLock);
@@ -3307,7 +3339,7 @@ static void D3D11_GetTextureDataCube(
 	/* Copy data into staging texture */
 	ID3D11DeviceContext_CopySubresourceRegion(
 		renderer->context,
-		tex->staging,
+		stagingTexture,
 		dstSubresourceIndex,
 		0,
 		0,
@@ -3320,7 +3352,7 @@ static void D3D11_GetTextureDataCube(
 	/* Read from the staging texture */
 	res = ID3D11DeviceContext_Map(
 		renderer->context,
-		tex->staging,
+		stagingTexture,
 		dstSubresourceIndex,
 		D3D11_MAP_READ,
 		0,
@@ -3338,11 +3370,16 @@ static void D3D11_GetTextureDataCube(
 	}
 	ID3D11DeviceContext_Unmap(
 		renderer->context,
-		tex->staging,
+		stagingTexture,
 		dstSubresourceIndex
 	);
 
 	SDL_UnlockMutex(renderer->ctxLock);
+
+	if (!tex->isRenderTarget)
+	{
+		ID3D11Resource_Release(stagingTexture);
+	}
 }
 
 /* Renderbuffers */
@@ -3521,7 +3558,6 @@ static FNA3D_Buffer* D3D11_GenVertexBuffer(
 	/* Return the result */
 	result->dynamic = dynamic;
 	result->size = desc.ByteWidth;
-	result->staging = NULL;
 	return (FNA3D_Buffer*) result;
 }
 
@@ -3553,10 +3589,6 @@ static void D3D11_AddDisposeVertexBuffer(
 		}
 	}
 
-	if (d3dBuffer->staging != NULL)
-	{
-		ID3D11Buffer_Release(d3dBuffer->staging);
-	}
 	ID3D11Buffer_Release(d3dBuffer->handle);
 	SDL_free(buffer);
 }
@@ -3639,6 +3671,7 @@ static void D3D11_GetVertexBufferData(
 	D3D11Renderer *renderer = (D3D11Renderer*) driverData;
 	D3D11Buffer *d3dBuffer = (D3D11Buffer*) buffer;
 	D3D11_BUFFER_DESC desc;
+	ID3D11Resource *stagingBuffer;
 	int32_t dataLength = vertexStride * elementCount;
 	uint8_t *src, *dst;
 	int32_t i;
@@ -3646,30 +3679,27 @@ static void D3D11_GetVertexBufferData(
 	D3D11_BOX srcBox = {offsetInBytes, 0, 0, offsetInBytes + dataLength, 1, 1};
 	HRESULT res;
 
-	/* Create staging buffer if needed */
-	if (d3dBuffer->staging == NULL)
-	{
-		desc.ByteWidth = d3dBuffer->size;
-		desc.Usage = D3D11_USAGE_STAGING;
-		desc.BindFlags = 0;
-		desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-		desc.MiscFlags = 0;
-		desc.StructureByteStride = 0;
-		res = ID3D11Device_CreateBuffer(
-			renderer->device,
-			&desc,
-			NULL,
-			&d3dBuffer->staging
-		);
-		ERROR_CHECK_RETURN("Could not create vertex buffer staging buffer",)
-	}
+	/* Create staging buffer */
+	desc.ByteWidth = d3dBuffer->size;
+	desc.Usage = D3D11_USAGE_STAGING;
+	desc.BindFlags = 0;
+	desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+	desc.MiscFlags = 0;
+	desc.StructureByteStride = 0;
+	res = ID3D11Device_CreateBuffer(
+		renderer->device,
+		&desc,
+		NULL,
+		(ID3D11Buffer**) &stagingBuffer
+	);
+	ERROR_CHECK_RETURN("Could not create vertex buffer staging buffer",)
 
 	SDL_LockMutex(renderer->ctxLock);
 
 	/* Copy data into staging buffer */
 	ID3D11DeviceContext_CopySubresourceRegion(
 		renderer->context,
-		(ID3D11Resource*) d3dBuffer->staging,
+		stagingBuffer,
 		0,
 		0,
 		0,
@@ -3682,7 +3712,7 @@ static void D3D11_GetVertexBufferData(
 	/* Read from the staging buffer */
 	res = ID3D11DeviceContext_Map(
 		renderer->context,
-		(ID3D11Resource*) d3dBuffer->staging,
+		stagingBuffer,
 		0,
 		D3D11_MAP_READ,
 		0,
@@ -3710,11 +3740,13 @@ static void D3D11_GetVertexBufferData(
 	}
 	ID3D11DeviceContext_Unmap(
 		renderer->context,
-		(ID3D11Resource*) d3dBuffer->staging,
+		stagingBuffer,
 		0
 	);
 
 	SDL_UnlockMutex(renderer->ctxLock);
+
+	ID3D11Resource_Release(stagingBuffer);
 }
 
 /* Index Buffers */
@@ -3750,7 +3782,6 @@ static FNA3D_Buffer* D3D11_GenIndexBuffer(
 	/* Return the result */
 	result->dynamic = dynamic;
 	result->size = desc.ByteWidth;
-	result->staging = NULL;
 	return (FNA3D_Buffer*) result;
 }
 
@@ -3774,10 +3805,6 @@ static void D3D11_AddDisposeIndexBuffer(
 		SDL_UnlockMutex(renderer->ctxLock);
 	}
 
-	if (d3dBuffer->staging != NULL)
-	{
-		ID3D11Buffer_Release(d3dBuffer->staging);
-	}
 	ID3D11Buffer_Release(d3dBuffer->handle);
 	SDL_free(buffer);
 }
@@ -3855,34 +3882,32 @@ static void D3D11_GetIndexBufferData(
 	D3D11Renderer *renderer = (D3D11Renderer*) driverData;
 	D3D11Buffer *d3dBuffer = (D3D11Buffer*) buffer;
 	D3D11_BUFFER_DESC desc;
+	ID3D11Resource *stagingBuffer;
 	D3D11_MAPPED_SUBRESOURCE subres;
 	D3D11_BOX srcBox = {offsetInBytes, 0, 0, offsetInBytes + dataLength, 1, 1};
 	HRESULT res;
 
-	/* Create staging buffer if needed */
-	if (d3dBuffer->staging == NULL)
-	{
-		desc.ByteWidth = d3dBuffer->size;
-		desc.Usage = D3D11_USAGE_STAGING;
-		desc.BindFlags = 0;
-		desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-		desc.MiscFlags = 0;
-		desc.StructureByteStride = 0;
-		res = ID3D11Device_CreateBuffer(
-			renderer->device,
-			&desc,
-			NULL,
-			&d3dBuffer->staging
-		);
-		ERROR_CHECK_RETURN("Index buffer staging buffer creation failed",)
-	}
+	/* Create staging buffer */
+	desc.ByteWidth = d3dBuffer->size;
+	desc.Usage = D3D11_USAGE_STAGING;
+	desc.BindFlags = 0;
+	desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+	desc.MiscFlags = 0;
+	desc.StructureByteStride = 0;
+	res = ID3D11Device_CreateBuffer(
+		renderer->device,
+		&desc,
+		NULL,
+		(ID3D11Buffer**) &stagingBuffer
+	);
+	ERROR_CHECK_RETURN("Index buffer staging buffer creation failed",)
 
 	SDL_LockMutex(renderer->ctxLock);
 
 	/* Copy data into staging buffer */
 	ID3D11DeviceContext_CopySubresourceRegion(
 		renderer->context,
-		(ID3D11Resource*) d3dBuffer->staging,
+		stagingBuffer,
 		0,
 		0,
 		0,
@@ -3895,7 +3920,7 @@ static void D3D11_GetIndexBufferData(
 	/* Read from the staging buffer */
 	res = ID3D11DeviceContext_Map(
 		renderer->context,
-		(ID3D11Resource*) d3dBuffer->staging,
+		stagingBuffer,
 		0,
 		D3D11_MAP_READ,
 		0,
@@ -3909,11 +3934,13 @@ static void D3D11_GetIndexBufferData(
 	);
 	ID3D11DeviceContext_Unmap(
 		renderer->context,
-		(ID3D11Resource*) d3dBuffer->staging,
+		stagingBuffer,
 		0
 	);
 
 	SDL_UnlockMutex(renderer->ctxLock);
+
+	ID3D11Resource_Release(stagingBuffer);
 }
 
 /* Effects */
@@ -4685,10 +4712,6 @@ try_create_device:
 	renderer->topology = (FNA3D_PrimitiveType) -1; /* Force an update */
 
 	/* Create and initialize the faux-backbuffer */
-	renderer->backbuffer = (D3D11Backbuffer*) SDL_malloc(
-		sizeof(D3D11Backbuffer)
-	);
-	SDL_memset(renderer->backbuffer, '\0', sizeof(D3D11Backbuffer));
 	D3D11_INTERNAL_CreateFramebuffer(
 		renderer,
 		presentationParameters

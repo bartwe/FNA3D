@@ -4977,22 +4977,21 @@ static void D3D11_PLATFORM_GetDefaultAdapter(
 	);
 }
 
-static inline void* GetDXGIHandle(SDL_Window *window)
-{
-	SDL_SysWMinfo info;
-	SDL_VERSION(&info.version);
-	SDL_GetWindowWMInfo((SDL_Window*) window, &info);
-	return (void*) info.info.win.window; /* HWND */
-}
-
 static void D3D11_PLATFORM_CreateSwapChain(
 	D3D11Renderer *renderer,
 	FNA3D_PresentationParameters *pp
 ) {
 	IDXGIOutput *output;
+	IDXGIFactory1* pParent;
 	DXGI_SWAP_CHAIN_DESC swapchainDesc;
 	DXGI_MODE_DESC swapchainBufferDesc;
+	SDL_SysWMinfo info;
+	HWND dxgiHandle;
 	HRESULT res;
+
+	SDL_VERSION(&info.version);
+	SDL_GetWindowWMInfo((SDL_Window*) pp->deviceWindowHandle, &info);
+	dxgiHandle = info.info.win.window;
 
 	/* Initialize swapchain buffer descriptor */
 	swapchainBufferDesc.Width = 0;
@@ -5021,7 +5020,7 @@ static void D3D11_PLATFORM_CreateSwapChain(
 	swapchainDesc.SampleDesc.Quality = 0;
 	swapchainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
 	swapchainDesc.BufferCount = 3;
-	swapchainDesc.OutputWindow = (HWND) GetDXGIHandle((SDL_Window*) pp->deviceWindowHandle);
+	swapchainDesc.OutputWindow = dxgiHandle;
 	swapchainDesc.Windowed = 1;
 	swapchainDesc.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
 	swapchainDesc.Flags = 0;
@@ -5034,6 +5033,42 @@ static void D3D11_PLATFORM_CreateSwapChain(
 		&renderer->swapchain
 	);
 	ERROR_CHECK("Could not create swapchain")
+
+	/*
+	 * The swapchain's parent is a separate factory from the factory that
+	 * we used to create the swapchain, and only that parent can be used to
+	 * set the window association. Trying to set an association on our factory
+	 * will silently fail and doesn't even verify arguments or return errors.
+	 * See https://gamedev.net/forums/topic/634235-dxgidisabling-altenter/4999955/
+	 */
+	res = IDXGISwapChain_GetParent(
+		(IDXGISwapChain*) renderer->swapchain,
+		&D3D_IID_IDXGIFactory1,
+		(void**) &pParent
+	);
+	if (FAILED(res))
+	{
+		FNA3D_LogWarn(
+			"Could not get swapchain parent! Error Code: %08X",
+			res
+		);
+	}
+	else
+	{
+		/* Disable DXGI window crap */
+		res = IDXGIFactory1_MakeWindowAssociation(
+			pParent,
+			dxgiHandle,
+			DXGI_MWA_NO_WINDOW_CHANGES
+		);
+		if (FAILED(res))
+		{
+			FNA3D_LogWarn(
+				"MakeWindowAssociation failed! Error Code: %08X",
+				res
+			);
+		}
+	}
 }
 
 #endif

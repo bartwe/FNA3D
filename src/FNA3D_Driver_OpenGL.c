@@ -5621,6 +5621,16 @@ static uint8_t OPENGL_PrepareWindowAttributes(uint32_t *flags)
 		);
 	}
 
+	/* If there's no GL library, bail!
+	 * Only do this after all the flags above are set, as they may affect
+	 * which GL library actually gets loaded (desktop vs ES, for example).
+	 * -flibit
+	 */
+	if (SDL_GL_LoadLibrary(NULL) < 0)
+	{
+		return 0;
+	}
+
 	*flags = SDL_WINDOW_OPENGL;
 	return 1;
 }

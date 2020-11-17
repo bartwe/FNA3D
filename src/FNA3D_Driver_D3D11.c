@@ -59,18 +59,18 @@
 #define ERROR_CHECK(msg) \
 	if (FAILED(res)) \
 	{ \
-		D3D11_INTERNAL_LogError("%s! Error Code: %s (0x%08X)", msg, res); \
+		D3D11_INTERNAL_LogError(renderer->device, msg, res); \
 	}
 #define ERROR_CHECK_RETURN(msg, ret) \
 	if (FAILED(res)) \
 	{ \
-		D3D11_INTERNAL_LogError("%s! Error Code: %s (0x%08X)", msg, res); \
+		D3D11_INTERNAL_LogError(renderer->device, msg, res); \
 		return ret; \
 	}
 #define ERROR_CHECK_UNLOCK_RETURN(msg, ret) \
 	if (FAILED(res)) \
 	{ \
-		D3D11_INTERNAL_LogError("%s! Error Code: %s (0x%08X)", msg, res); \
+		D3D11_INTERNAL_LogError(renderer->device, msg, res); \
 		SDL_UnlockMutex(renderer->ctxLock); \
 		return ret; \
 	}
@@ -487,8 +487,8 @@ static const char* FAUX_BLIT_PIXEL_SHADER =
 /* Helper Functions */
 
 static void D3D11_INTERNAL_LogError(
-	const char* fmt,
-	char* msg,
+	ID3D11Device *device,
+	const char *msg,
 	HRESULT res
 ) {
 	#define MAX_ERROR_LEN 1024 /* FIXME: Arbitrary! */
@@ -496,6 +496,11 @@ static void D3D11_INTERNAL_LogError(
 	/* Buffer for text, ensure space for \0 terminator after buffer */
 	char wszMsgBuff[MAX_ERROR_LEN + 1];
 	DWORD dwChars; /* Number of chars returned. */
+
+	if (res == DXGI_ERROR_DEVICE_REMOVED)
+	{
+		res = ID3D11Device_GetDeviceRemovedReason(device);
+	}
 
 	/* Try to get the message from the system errors. */
 	dwChars = FormatMessage(
@@ -507,6 +512,13 @@ static void D3D11_INTERNAL_LogError(
 		MAX_ERROR_LEN,
 		NULL
 	);
+
+	/* No message? Screw it, just post the code. */
+	if (dwChars == 0)
+	{
+		FNA3D_LogError("%s! Error Code: 0x%08X", msg, res);
+		return;
+	}
 
 	/* Ensure valid range */
 	dwChars = SDL_min(dwChars, MAX_ERROR_LEN);
@@ -527,7 +539,7 @@ static void D3D11_INTERNAL_LogError(
 	/* Ensure null-terminated string */
 	wszMsgBuff[dwChars] = '\0';
 
-	FNA3D_LogError(fmt, msg, wszMsgBuff, res);
+	FNA3D_LogError("%s! Error Code: %s (0x%08X)", msg, wszMsgBuff, res);
 }
 
 static inline uint32_t D3D11_INTERNAL_CalcSubresource(

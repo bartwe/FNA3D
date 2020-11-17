@@ -3015,7 +3015,6 @@ static void VULKAN_INTERNAL_DestroyBuffer(
 				NULL
 			);
 
-			SDL_free(buffer->subBuffers[i]->allocation->freeRegions[0]);
 			SDL_free(buffer->subBuffers[i]->allocation->freeRegions);
 			SDL_free(buffer->subBuffers[i]->allocation);
 		}
@@ -3061,7 +3060,6 @@ static void VULKAN_INTERNAL_DestroyTexture(
 			NULL
 		);
 
-		SDL_free(texture->allocation->freeRegions[0]);
 		SDL_free(texture->allocation->freeRegions);
 		SDL_free(texture->allocation);
 	}
@@ -4215,10 +4213,12 @@ static void VULKAN_INTERNAL_SubmitCommands(
 			&swapChainImageIndex
 		);
 
-		while (result == VK_ERROR_OUT_OF_DATE_KHR)
+		if (result == VK_ERROR_OUT_OF_DATE_KHR)
 		{
+			/* Can't present, try to recreate swapchain */
 			VULKAN_INTERNAL_RecreateSwapchain(renderer, 0);
 
+			/* Try to acquire again */
 			result = renderer->vkAcquireNextImageKHR(
 				renderer->logicalDevice,
 				renderer->swapChain,
@@ -4227,9 +4227,37 @@ static void VULKAN_INTERNAL_SubmitCommands(
 				VK_NULL_HANDLE,
 				&swapChainImageIndex
 			);
+
+			/* We're screwed, bail out */
+			if (result == VK_ERROR_OUT_OF_DATE_KHR)
+			{
+				/* Reset the active command buffers */
+				for (i = 0; i < renderer->activeCommandBufferCount; i += 1)
+				{
+					result = renderer->vkResetCommandBuffer(
+						renderer->activeCommandBuffers[i],
+						VK_COMMAND_BUFFER_RESET_RELEASE_RESOURCES_BIT
+					);
+
+					if (result != VK_SUCCESS)
+					{
+						LogVulkanResult("vkResetCommandBuffer", result);
+					}
+				}
+
+				for (i = 0; i < renderer->activeCommandBufferCount; i += 1)
+				{
+					renderer->inactiveCommandBuffers[renderer->inactiveCommandBufferCount] = renderer->activeCommandBuffers[i];
+					renderer->inactiveCommandBufferCount += 1;
+				}
+
+				renderer->activeCommandBufferCount = 0;
+
+				return;
+			}
 		}
 
-		if (result != VK_SUCCESS)
+		if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR)
 		{
 			LogVulkanResult("vkAcquireNextImageKHR", result);
 			FNA3D_LogError("failed to acquire swapchain image");
@@ -4317,7 +4345,6 @@ static void VULKAN_INTERNAL_SubmitCommands(
 				}
 			}
 
-			renderer->submittedBuffers[i]->currentSubBufferIndex = 0;
 			renderer->submittedBuffers[i] = NULL;
 		}
 	}
@@ -4342,7 +4369,6 @@ static void VULKAN_INTERNAL_SubmitCommands(
 		{
 			renderer->buffersInUse[i]->bound = 0;
 			renderer->buffersInUse[i]->boundSubmitted = 1;
-			renderer->buffersInUse[i]->currentSubBufferIndex = 0;
 
 			renderer->submittedBuffers[i] = renderer->buffersInUse[i];
 			renderer->buffersInUse[i] = NULL;
@@ -5051,7 +5077,7 @@ static uint8_t VULKAN_INTERNAL_AllocateSubBuffer(
 	findMemoryResult = VULKAN_INTERNAL_FindAvailableMemory(
 		renderer,
 		subBuffer->buffer,
-		NULL,
+		VK_NULL_HANDLE,
 		&subBuffer->allocation,
 		&subBuffer->offset,
 		&subBuffer->size
@@ -5114,6 +5140,9 @@ static void VULKAN_INTERNAL_MarkAsBound(
 	VulkanRenderer *renderer,
 	VulkanBuffer *buf
 ) {
+	VulkanSubBuffer *subbuf = buf->subBuffers[buf->currentSubBufferIndex];
+	subbuf->bound = renderer->submitCounter;
+
 	/* Don't rebind a bound buffer */
 	if (buf->bound) return;
 
@@ -5147,56 +5176,60 @@ static void VULKAN_INTERNAL_SetBufferData(
 	uint8_t *previousSubBufferMapPointer;
 	uint8_t allocateResult;
 	VkResult vulkanResult;
+	uint32_t i;
 
 	#define CURIDX vulkanBuffer->currentSubBufferIndex
 	#define SUBBUF vulkanBuffer->subBuffers[CURIDX]
 
-	prevIndex = CURIDX;
-
-	/* Create a new SubBuffer if needed */
-	if (CURIDX == vulkanBuffer->subBufferCount)
+	/* If buffer has not been bound this frame, set the first unbound index */
+	if (!vulkanBuffer->bound)
 	{
-		VULKAN_INTERNAL_AllocateSubBuffer(renderer, vulkanBuffer);
+		for (i = 0; i < vulkanBuffer->subBufferCount; i += 1)
+		{
+			if (vulkanBuffer->subBuffers[i]->bound == -1)
+			{
+				break;
+			}
+		}
+		CURIDX = i;
 	}
 
-	if (vulkanBuffer->bound || vulkanBuffer->boundSubmitted)
+	prevIndex = CURIDX;
+
+	/*
+	 * If buffer was bound and options is NONE or DISCARD
+	 * find the next available unbound sub-buffer
+	 */
+	if (vulkanBuffer->bound)
 	{
-		if (options == FNA3D_SETDATAOPTIONS_NONE)
+		if (options == FNA3D_SETDATAOPTIONS_NONE || options == FNA3D_SETDATAOPTIONS_DISCARD)
 		{
-			VULKAN_INTERNAL_FlushCommands(renderer, 1);
-		}
-		else if (options == FNA3D_SETDATAOPTIONS_DISCARD)
-		{
-			while (SUBBUF->bound != -1)
+			while (CURIDX < vulkanBuffer->subBufferCount && SUBBUF->bound != -1)
 			{
 				CURIDX += 1;
-
-				/* Create a new SubBuffer if needed */
-				if (CURIDX == vulkanBuffer->subBufferCount)
-				{
-					allocateResult = VULKAN_INTERNAL_AllocateSubBuffer(renderer, vulkanBuffer);
-					if (allocateResult == 2)
-					{
-						/* Out of memory, flush commands to free memory */
-						VULKAN_INTERNAL_FlushCommands(renderer, 1);
-					}
-					else if (allocateResult == 0)
-					{
-						/* Something went very wrong, time to die */
-						FNA3D_LogError("Failed to allocate VulkanSubBuffer!");
-						return;
-					}
-				}
 			}
 		}
 	}
 
+	/* Create a new SubBuffer if needed */
+	if (CURIDX == vulkanBuffer->subBufferCount)
+	{
+		allocateResult = VULKAN_INTERNAL_AllocateSubBuffer(renderer, vulkanBuffer);
+		if (allocateResult == 2)
+		{
+			/* Out of memory, flush commands to free memory */
+			VULKAN_INTERNAL_FlushCommands(renderer, 1);
+		}
+		else if (allocateResult == 0)
+		{
+			/* Something went very wrong, time to die */
+			FNA3D_LogError("Failed to allocate VulkanSubBuffer!");
+			return;
+		}
+	}
 
-
-	/* Copy over previous contents when needed */
-	if (	options == FNA3D_SETDATAOPTIONS_NONE &&
-		dataLength < vulkanBuffer->size &&
-		CURIDX != prevIndex			)
+	/* If options is NONE and buffer was bound, copy the previous data into the new buffer */
+	if (options == FNA3D_SETDATAOPTIONS_NONE && prevIndex != CURIDX)
 	{
 		/* we need to do this craziness because you can't map the same allocation twice */
 		if (SUBBUF->allocation != vulkanBuffer->subBuffers[prevIndex]->allocation)
@@ -5278,6 +5311,7 @@ static void VULKAN_INTERNAL_SetBufferData(
 		}
 	}
 
+	/* Map the memory and perform the copy */
 	vulkanResult = renderer->vkMapMemory(
 		renderer->logicalDevice,
 		SUBBUF->allocation->memory,
@@ -5293,7 +5327,6 @@ static void VULKAN_INTERNAL_SetBufferData(
 		return;
 	}
 
-	/* Copy the data! */
 	SDL_memcpy(
 		mapPointer + offsetInBytes,
 		data,
@@ -5304,8 +5337,6 @@ static void VULKAN_INTERNAL_SetBufferData(
 		renderer->logicalDevice,
 		SUBBUF->allocation->memory
 	);
-
-	SUBBUF->bound = renderer->submitCounter;
 
 	#undef SUBBUF
 	#undef CURIDX
@@ -5419,7 +5450,7 @@ static uint8_t VULKAN_INTERNAL_CreateTexture(
 
 	findMemoryResult = VULKAN_INTERNAL_FindAvailableMemory(
 		renderer,
-		NULL,
+		VK_NULL_HANDLE,
 		texture->image,
 		&texture->allocation,
 		&texture->offset,
@@ -6184,21 +6215,28 @@ static VkPipeline VULKAN_INTERNAL_FetchPipeline(VulkanRenderer *renderer)
 	frontStencilState.writeMask = renderer->depthStencilState.stencilWriteMask;
 	frontStencilState.reference = renderer->depthStencilState.referenceStencil;
 
-	backStencilState.failOp = XNAToVK_StencilOp[
-		renderer->depthStencilState.ccwStencilFail
-	];
-	backStencilState.passOp = XNAToVK_StencilOp[
-		renderer->depthStencilState.ccwStencilPass
-	];
-	backStencilState.depthFailOp = XNAToVK_StencilOp[
-		renderer->depthStencilState.ccwStencilDepthBufferFail
-	];
-	backStencilState.compareOp = XNAToVK_CompareOp[
-		renderer->depthStencilState.stencilFunction
-	];
-	backStencilState.compareMask = renderer->depthStencilState.stencilMask;
-	backStencilState.writeMask = renderer->depthStencilState.stencilWriteMask;
-	backStencilState.reference = renderer->depthStencilState.referenceStencil;
+	if (renderer->depthStencilState.twoSidedStencilMode)
+	{
+		backStencilState.failOp = XNAToVK_StencilOp[
+			renderer->depthStencilState.ccwStencilFail
+		];
+		backStencilState.passOp = XNAToVK_StencilOp[
+			renderer->depthStencilState.ccwStencilPass
+		];
+		backStencilState.depthFailOp = XNAToVK_StencilOp[
+			renderer->depthStencilState.ccwStencilDepthBufferFail
+		];
+		backStencilState.compareOp = XNAToVK_CompareOp[
+			renderer->depthStencilState.ccwStencilFunction
+		];
+		backStencilState.compareMask = renderer->depthStencilState.stencilMask;
+		backStencilState.writeMask = renderer->depthStencilState.stencilWriteMask;
+		backStencilState.reference = renderer->depthStencilState.referenceStencil;
+	}
+	else
+	{
+		backStencilState = frontStencilState;
+	}
 
 	/* Depth Stencil */
 
@@ -6543,7 +6581,7 @@ static VkRenderPass VULKAN_INTERNAL_FetchRenderPass(VulkanRenderer *renderer)
 {
 	VkResult vulkanResult;
 	VkRenderPass renderPass;
-	VkAttachmentDescription attachmentDescriptions[MAX_RENDERTARGET_BINDINGS + 1];
+	VkAttachmentDescription attachmentDescriptions[2 * MAX_RENDERTARGET_BINDINGS + 1];
 	uint32_t attachmentDescriptionsCount = 0;
 	uint32_t i;
 	VkAttachmentReference colorAttachmentReferences[MAX_RENDERTARGET_BINDINGS];
@@ -6587,7 +6625,13 @@ static VkRenderPass VULKAN_INTERNAL_FetchRenderPass(VulkanRenderer *renderer)
 		return renderPass;
 	}
 
-	/* Otherwise lets make a new one */
+	/* 
+	 * FIXME: We have to always store just in case changing render state
+	 * breaks the render pass. Otherwise we risk discarding necessary data.
+	 * The only way to avoid this would be to buffer draw calls so we can
+	 * ensure that only the final render pass before switching render targets
+	 * may be discarded.
+	 */
 
 	for (i = 0; i < renderer->colorAttachmentCount; i += 1)
 	{
@@ -6631,11 +6675,15 @@ static VkRenderPass VULKAN_INTERNAL_FetchRenderPass(VulkanRenderer *renderer)
 			attachmentDescriptions[attachmentDescriptionsCount].loadOp =
 				hash.clearColor ?
 					VK_ATTACHMENT_LOAD_OP_CLEAR :
-					(hash.preserveTargetContents ?
-						VK_ATTACHMENT_LOAD_OP_LOAD :
-						VK_ATTACHMENT_LOAD_OP_DONT_CARE);
+					VK_ATTACHMENT_LOAD_OP_LOAD;
 			attachmentDescriptions[attachmentDescriptionsCount].storeOp =
-				hash.preserveTargetContents ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE;
+				VK_ATTACHMENT_STORE_OP_STORE;
+				/* 
+				 * Once above FIXME is resolved:
+				 * 	hash.preserveTargetContents ?
+				 *		VK_ATTACHMENT_STORE_OP_STORE :
+				 *		VK_ATTACHMENT_STORE_OP_DONT_CARE;
+				 */
 			attachmentDescriptions[attachmentDescriptionsCount].stencilLoadOp =
 				VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 			attachmentDescriptions[attachmentDescriptionsCount].stencilStoreOp =
@@ -6710,23 +6758,27 @@ static VkRenderPass VULKAN_INTERNAL_FetchRenderPass(VulkanRenderer *renderer)
 		attachmentDescriptions[attachmentDescriptionsCount].loadOp =
 			hash.clearDepth ?
 				VK_ATTACHMENT_LOAD_OP_CLEAR :
-				(hash.preserveTargetContents ?
-					VK_ATTACHMENT_LOAD_OP_LOAD :
-					VK_ATTACHMENT_LOAD_OP_DONT_CARE);
+				VK_ATTACHMENT_LOAD_OP_LOAD;
 		attachmentDescriptions[attachmentDescriptionsCount].storeOp =
-			hash.preserveTargetContents ?
-				VK_ATTACHMENT_STORE_OP_STORE :
-				VK_ATTACHMENT_STORE_OP_DONT_CARE;
+			VK_ATTACHMENT_STORE_OP_STORE;
+			/*
+			 * Once above FIXME is resolved:
+			 * 	hash.preserveTargetContents ?
+			 *		VK_ATTACHMENT_STORE_OP_STORE :
+			 *		VK_ATTACHMENT_STORE_OP_DONT_CARE;
+			 */
 		attachmentDescriptions[attachmentDescriptionsCount].stencilLoadOp =
 			hash.clearStencil ?
 				VK_ATTACHMENT_LOAD_OP_CLEAR :
-				(hash.preserveTargetContents ?
-					VK_ATTACHMENT_LOAD_OP_LOAD :
-					VK_ATTACHMENT_LOAD_OP_DONT_CARE);
+				VK_ATTACHMENT_LOAD_OP_LOAD;
 		attachmentDescriptions[attachmentDescriptionsCount].stencilStoreOp =
-			hash.preserveTargetContents ?
-				VK_ATTACHMENT_STORE_OP_STORE :
-				VK_ATTACHMENT_STORE_OP_DONT_CARE;
+			VK_ATTACHMENT_STORE_OP_STORE;
+			/*
+			 * Once above FIXME is resolved:
+			 * 	hash.preserveTargetContents ?
+			 *		VK_ATTACHMENT_STORE_OP_STORE :
+			 *		VK_ATTACHMENT_STORE_OP_DONT_CARE;
+			 */
 		attachmentDescriptions[attachmentDescriptionsCount].initialLayout =
 			VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 		attachmentDescriptions[attachmentDescriptionsCount].finalLayout =
@@ -7092,9 +7144,9 @@ static void VULKAN_INTERNAL_BeginRenderPassClear(
 		return;
 	}
 
-	renderer->shouldClearColorOnBeginPass = clearColor;
-	renderer->shouldClearDepthOnBeginPass = clearDepth;
-	renderer->shouldClearStencilOnBeginPass = clearStencil;
+	renderer->shouldClearColorOnBeginPass |= clearColor;
+	renderer->shouldClearDepthOnBeginPass |= clearDepth;
+	renderer->shouldClearStencilOnBeginPass |= clearStencil;
 
 	if (clearColor)
 	{
@@ -9999,6 +10051,7 @@ static uint8_t VULKAN_PrepareWindowAttributes(uint32_t *flags)
 	SDL_Window *dummyWindowHandle;
 	FNA3D_PresentationParameters presentationParameters;
 	VulkanRenderer *renderer;
+	uint8_t result;
 
 	if (SDL_Vulkan_LoadLibrary(NULL) < 0)
 	{
@@ -10083,20 +10136,25 @@ static uint8_t VULKAN_PrepareWindowAttributes(uint32_t *flags)
 	{
 		deviceExtensionCount -= 1;
 	}
-	if (!VULKAN_INTERNAL_DeterminePhysicalDevice(
+	result = VULKAN_INTERNAL_DeterminePhysicalDevice(
 		renderer,
 		deviceExtensionNames,
 		deviceExtensionCount
-	)) {
-		SDL_DestroyWindow(dummyWindowHandle);
-		SDL_free(renderer);
-		FNA3D_LogWarn("Vulkan: Failed to determine a suitable physical device");
-		return 0;
-	}
+	);
 
+	renderer->vkDestroySurfaceKHR(
+		renderer->instance,
+		renderer->surface,
+		NULL
+	);
 	SDL_DestroyWindow(dummyWindowHandle);
 	SDL_free(renderer);
-	return 1;
+
+	if (!result)
+	{
+		FNA3D_LogWarn("Vulkan: Failed to determine a suitable physical device");
+	}
+	return result;
 }
 
 static void VULKAN_GetDrawableSize(void* window, int32_t *w, int32_t *h)
@@ -10276,7 +10334,6 @@ static FNA3D_Device* VULKAN_CreateDevice(
 	renderer->buffersInUse = (VulkanBuffer**) SDL_malloc(
 		sizeof(VulkanBuffer*) * renderer->maxBuffersInUse
 	);
-	SDL_zerop(renderer->buffersInUse);
 
 	renderer->maxSubmittedBuffers = 32;
 	renderer->numSubmittedBuffers = 0;

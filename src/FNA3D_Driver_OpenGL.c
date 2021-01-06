@@ -2549,11 +2549,16 @@ static void OPENGL_SetRenderTargets(
 		);
 		renderer->renderTargetBound = 0;
 		/* The driver is able and willing to provide us a sRGB backbuffer even if we don't ask for one,
-		 * so we need to disable FRAMEBUFFER_SRGB if we don't actually want sRGB blending/sampling */
+		 * so we need to disable FRAMEBUFFER_SRGB if we don't actually want sRGB blending/sampling
+		 */
 		if (renderer->backbuffer->isSrgb)
+		{
 			renderer->glEnable(GL_FRAMEBUFFER_SRGB_EXT);
+		}
 		else
+		{
 			renderer->glDisable(GL_FRAMEBUFFER_SRGB_EXT);
+		}
 		return;
 	}
 	else

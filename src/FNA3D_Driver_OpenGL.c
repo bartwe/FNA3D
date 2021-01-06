@@ -121,7 +121,7 @@ typedef struct OpenGLBackbuffer
 	#define BACKBUFFER_TYPE_OPENGL 1
 	uint8_t type;
 
-    uint8_t isSrgb;
+	uint8_t isSrgb;
 	int32_t width;
 	int32_t height;
 	FNA3D_DepthFormat depthFormat;
@@ -2538,8 +2538,6 @@ static void OPENGL_SetRenderTargets(
 	int32_t i;
 	GLuint handle;
 
-    renderer->glEnable(GL_FRAMEBUFFER_SRGB_EXT);
-
 	/* Bind the right framebuffer, if needed */
 	if (renderTargets == NULL)
 	{
@@ -2577,8 +2575,7 @@ static void OPENGL_SetRenderTargets(
 		}
 		else
 		{
-			OpenGLTexture* texture = ((OpenGLTexture*)rt->texture);
-			renderer->attachments[i] = texture->handle;
+			renderer->attachments[i] = ((OpenGLTexture*) rt->texture)->handle;
 			if (rt->type == FNA3D_RENDERTARGET_TYPE_2D)
 			{
 				renderer->attachmentTypes[i] = GL_TEXTURE_2D;
@@ -2983,8 +2980,8 @@ static void OPENGL_INTERNAL_CreateBackbuffer(
 		{
 			renderer->backbuffer->width = parameters->backBufferWidth;
 			renderer->backbuffer->height = parameters->backBufferHeight;
-            renderer->backbuffer->isSrgb = parameters->backBufferFormat == FNA3D_SURFACEFORMAT_COLORSRGB_EXT;
-            renderer->backbuffer->multiSampleCount = parameters->multiSampleCount;
+			renderer->backbuffer->isSrgb = parameters->backBufferFormat == FNA3D_SURFACEFORMAT_COLORSRGB_EXT;
+			renderer->backbuffer->multiSampleCount = parameters->multiSampleCount;
 			if (renderer->backbuffer->opengl.texture != 0)
 			{
 				renderer->glDeleteTextures(

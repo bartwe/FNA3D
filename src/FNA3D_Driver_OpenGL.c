@@ -2564,8 +2564,9 @@ static void OPENGL_SetRenderTargets(
 	else
 	{
 		BindFramebuffer(renderer, renderer->targetFramebuffer);
-		/* unlike the backbuffer, our format will be sRGB or non-sRGB as we expect so we can leave
-		 * this flag on universally and the blending will be configured based on the format */
+		/* Unlike the backbuffer, our format will be sRGB or non-sRGB as we expect so we can leave
+		 * this flag on universally and the blending will be configured based on the format
+		 */
 		renderer->glEnable(GL_FRAMEBUFFER_SRGB_EXT);
 		renderer->renderTargetBound = 1;
 	}

@@ -2521,7 +2521,7 @@ static void D3D11_INTERNAL_CreateFramebuffer(
 
 	/* Create a render target view for the swapchain */
 	
-	DXGI_FORMAT swapchainFormat = colorBufferDesc.Format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB
+	DXGI_FORMAT swapchainFormat = (colorBufferDesc.Format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB)
 		? DXGI_FORMAT_R8G8B8A8_UNORM_SRGB
 		: DXGI_FORMAT_R8G8B8A8_UNORM;
 	swapchainViewDesc.Format = swapchainFormat;

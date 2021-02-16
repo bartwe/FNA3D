@@ -68,6 +68,7 @@ struct OpenGLTexture /* Cast from FNA3D_Texture* */
 		} cube;
 	};
 	OpenGLTexture *next; /* linked list */
+	uint8_t external;
 };
 
 static OpenGLTexture NullTexture =
@@ -821,8 +822,8 @@ static void FNA3D_ExecuteCommand(
 	switch (cmd->type)
 	{
 		case FNA3D_COMMAND_CREATEEFFECT:
-			FNA3D_CreateEffect(
-				device,
+			device->CreateEffect(
+				device->driverData,
 				cmd->createEffect.effectCode,
 				cmd->createEffect.effectCodeLength,
 				cmd->createEffect.effect,
@@ -830,32 +831,32 @@ static void FNA3D_ExecuteCommand(
 			);
 			break;
 		case FNA3D_COMMAND_CLONEEFFECT:
-			FNA3D_CloneEffect(
-				device,
+			device->CloneEffect(
+				device->driverData,
 				cmd->cloneEffect.cloneSource,
 				cmd->cloneEffect.effect,
 				cmd->cloneEffect.effectData
 			);
 			break;
 		case FNA3D_COMMAND_GENVERTEXBUFFER:
-			cmd->genVertexBuffer.retval = FNA3D_GenVertexBuffer(
-				device,
+			cmd->genVertexBuffer.retval = device->GenVertexBuffer(
+				device->driverData,
 				cmd->genVertexBuffer.dynamic,
 				cmd->genVertexBuffer.usage,
 				cmd->genVertexBuffer.sizeInBytes
 			);
 			break;
 		case FNA3D_COMMAND_GENINDEXBUFFER:
-			cmd->genIndexBuffer.retval = FNA3D_GenIndexBuffer(
-				device,
+			cmd->genIndexBuffer.retval = device->GenIndexBuffer(
+				device->driverData,
 				cmd->genIndexBuffer.dynamic,
 				cmd->genIndexBuffer.usage,
 				cmd->genIndexBuffer.sizeInBytes
 			);
 			break;
 		case FNA3D_COMMAND_SETVERTEXBUFFERDATA:
-			FNA3D_SetVertexBufferData(
-				device,
+			device->SetVertexBufferData(
+				device->driverData,
 				cmd->setVertexBufferData.buffer,
 				cmd->setVertexBufferData.offsetInBytes,
 				cmd->setVertexBufferData.data,
@@ -866,8 +867,8 @@ static void FNA3D_ExecuteCommand(
 			);
 			break;
 		case FNA3D_COMMAND_SETINDEXBUFFERDATA:
-			FNA3D_SetIndexBufferData(
-				device,
+			device->SetIndexBufferData(
+				device->driverData,
 				cmd->setIndexBufferData.buffer,
 				cmd->setIndexBufferData.offsetInBytes,
 				cmd->setIndexBufferData.data,
@@ -876,8 +877,8 @@ static void FNA3D_ExecuteCommand(
 			);
 			break;
 		case FNA3D_COMMAND_GETVERTEXBUFFERDATA:
-			FNA3D_GetVertexBufferData(
-				device,
+			device->GetVertexBufferData(
+				device->driverData,
 				cmd->getVertexBufferData.buffer,
 				cmd->getVertexBufferData.offsetInBytes,
 				cmd->getVertexBufferData.data,
@@ -887,8 +888,8 @@ static void FNA3D_ExecuteCommand(
 			);
 			break;
 		case FNA3D_COMMAND_GETINDEXBUFFERDATA:
-			FNA3D_GetIndexBufferData(
-				device,
+			device->GetIndexBufferData(
+				device->driverData,
 				cmd->getIndexBufferData.buffer,
 				cmd->getIndexBufferData.offsetInBytes,
 				cmd->getIndexBufferData.data,
@@ -896,8 +897,8 @@ static void FNA3D_ExecuteCommand(
 			);
 			break;
 		case FNA3D_COMMAND_CREATETEXTURE2D:
-			cmd->createTexture2D.retval = FNA3D_CreateTexture2D(
-				device,
+			cmd->createTexture2D.retval = device->CreateTexture2D(
+				device->driverData,
 				cmd->createTexture2D.format,
 				cmd->createTexture2D.width,
 				cmd->createTexture2D.height,
@@ -906,8 +907,8 @@ static void FNA3D_ExecuteCommand(
 			);
 			break;
 		case FNA3D_COMMAND_CREATETEXTURE3D:
-			cmd->createTexture3D.retval = FNA3D_CreateTexture3D(
-				device,
+			cmd->createTexture3D.retval = device->CreateTexture3D(
+				device->driverData,
 				cmd->createTexture3D.format,
 				cmd->createTexture3D.width,
 				cmd->createTexture3D.height,
@@ -916,8 +917,8 @@ static void FNA3D_ExecuteCommand(
 			);
 			break;
 		case FNA3D_COMMAND_CREATETEXTURECUBE:
-			cmd->createTextureCube.retval = FNA3D_CreateTextureCube(
-				device,
+			cmd->createTextureCube.retval = device->CreateTextureCube(
+				device->driverData,
 				cmd->createTextureCube.format,
 				cmd->createTextureCube.size,
 				cmd->createTextureCube.levelCount,
@@ -925,8 +926,8 @@ static void FNA3D_ExecuteCommand(
 			);
 			break;
 		case FNA3D_COMMAND_SETTEXTUREDATA2D:
-			FNA3D_SetTextureData2D(
-				device,
+			device->SetTextureData2D(
+				device->driverData,
 				cmd->setTextureData2D.texture,
 				cmd->setTextureData2D.x,
 				cmd->setTextureData2D.y,
@@ -938,8 +939,8 @@ static void FNA3D_ExecuteCommand(
 			);
 			break;
 		case FNA3D_COMMAND_SETTEXTUREDATA3D:
-			FNA3D_SetTextureData3D(
-				device,
+			device->SetTextureData3D(
+				device->driverData,
 				cmd->setTextureData3D.texture,
 				cmd->setTextureData3D.x,
 				cmd->setTextureData3D.y,
@@ -953,8 +954,8 @@ static void FNA3D_ExecuteCommand(
 			);
 			break;
 		case FNA3D_COMMAND_SETTEXTUREDATACUBE:
-			FNA3D_SetTextureDataCube(
-				device,
+			device->SetTextureDataCube(
+				device->driverData,
 				cmd->setTextureDataCube.texture,
 				cmd->setTextureDataCube.x,
 				cmd->setTextureDataCube.y,
@@ -967,8 +968,8 @@ static void FNA3D_ExecuteCommand(
 			);
 			break;
 		case FNA3D_COMMAND_GETTEXTUREDATA2D:
-			FNA3D_GetTextureData2D(
-				device,
+			device->GetTextureData2D(
+				device->driverData,
 				cmd->getTextureData2D.texture,
 				cmd->getTextureData2D.x,
 				cmd->getTextureData2D.y,
@@ -980,8 +981,8 @@ static void FNA3D_ExecuteCommand(
 			);
 			break;
 		case FNA3D_COMMAND_GETTEXTUREDATA3D:
-			FNA3D_GetTextureData3D(
-				device,
+			device->GetTextureData3D(
+				device->driverData,
 				cmd->getTextureData3D.texture,
 				cmd->getTextureData3D.x,
 				cmd->getTextureData3D.y,
@@ -995,8 +996,8 @@ static void FNA3D_ExecuteCommand(
 			);
 			break;
 		case FNA3D_COMMAND_GETTEXTUREDATACUBE:
-			FNA3D_GetTextureDataCube(
-				device,
+			device->GetTextureDataCube(
+				device->driverData,
 				cmd->getTextureDataCube.texture,
 				cmd->getTextureDataCube.x,
 				cmd->getTextureDataCube.y,
@@ -1009,8 +1010,8 @@ static void FNA3D_ExecuteCommand(
 			);
 			break;
 		case FNA3D_COMMAND_GENCOLORRENDERBUFFER:
-			cmd->genColorRenderbuffer.retval = FNA3D_GenColorRenderbuffer(
-				device,
+			cmd->genColorRenderbuffer.retval = device->GenColorRenderbuffer(
+				device->driverData,
 				cmd->genColorRenderbuffer.width,
 				cmd->genColorRenderbuffer.height,
 				cmd->genColorRenderbuffer.format,
@@ -1019,8 +1020,8 @@ static void FNA3D_ExecuteCommand(
 			);
 			break;
 		case FNA3D_COMMAND_GENDEPTHRENDERBUFFER:
-			cmd->genDepthStencilRenderbuffer.retval = FNA3D_GenDepthStencilRenderbuffer(
-				device,
+			cmd->genDepthStencilRenderbuffer.retval = device->GenDepthStencilRenderbuffer(
+				device->driverData,
 				cmd->genDepthStencilRenderbuffer.width,
 				cmd->genDepthStencilRenderbuffer.height,
 				cmd->genDepthStencilRenderbuffer.format,
@@ -2539,7 +2540,7 @@ static void OPENGL_SetRenderTargets(
 	GLuint handle;
 
 	/* Bind the right framebuffer, if needed */
-	if (renderTargets == NULL)
+	if (numRenderTargets <= 0)
 	{
 		BindFramebuffer(
 			renderer,
@@ -3476,6 +3477,7 @@ static inline OpenGLTexture* OPENGL_INTERNAL_CreateTexture(
 	result->lodBias = 0.0f;
 	result->format = format;
 	result->next = NULL;
+	result->external = 0;
 
 	BindTexture(renderer, result);
 	renderer->glTexParameteri(
@@ -3775,7 +3777,10 @@ static void OPENGL_INTERNAL_DestroyTexture(
 			renderer->textures[i] = &NullTexture;
 		}
 	}
-	renderer->glDeleteTextures(1, &texture->handle);
+	if (!texture->external)
+	{
+		renderer->glDeleteTextures(1, &texture->handle);
+	}
 	SDL_free(texture);
 }
 
@@ -4867,7 +4872,7 @@ static void OPENGL_CreateEffect(
 	shaderBackend.getError = MOJOSHADER_glGetError;
 	shaderBackend.m = NULL;
 	shaderBackend.f = NULL;
-	shaderBackend.malloc_data = NULL;
+	shaderBackend.malloc_data = renderer;
 
 	*effectData = MOJOSHADER_compileEffect(
 		effectCode,
@@ -5281,6 +5286,42 @@ static void GLAPIENTRY DebugCall(
 			debugSeverityStr[severity - GL_DEBUG_SEVERITY_HIGH]
 		);
 	}
+}
+
+/* External Interop */
+
+static void OPENGL_GetSysRenderer(
+	FNA3D_Renderer* driverData,
+	FNA3D_SysRendererEXT *sysrenderer
+) {
+	OpenGLRenderer* renderer = (OpenGLRenderer*) driverData;
+
+	sysrenderer->rendererType = FNA3D_RENDERER_TYPE_OPENGL_EXT;
+	sysrenderer->renderer.opengl.context = renderer->context;
+}
+
+static FNA3D_Texture* OPENGL_CreateSysTexture(
+	FNA3D_Renderer* driverData,
+	FNA3D_SysTextureEXT *systexture
+) {
+	OpenGLTexture* result;
+
+	if (systexture->rendererType != FNA3D_RENDERER_TYPE_OPENGL_EXT)
+	{
+		return NULL;
+	}
+
+	result = (OpenGLTexture*) SDL_malloc(
+		sizeof(OpenGLTexture)
+	);
+
+	SDL_zerop(result);
+
+	result->handle = systexture->texture.opengl.handle;
+	result->target = (GLenum) systexture->texture.opengl.target;
+	result->external = 1;
+
+	return (FNA3D_Texture*) result;
 }
 
 /* Load GL Entry Points */
@@ -5834,7 +5875,7 @@ FNA3D_Device* OPENGL_CreateDevice(
 		NULL,
 		NULL,
 		NULL,
-		NULL
+		renderer
 	);
 	MOJOSHADER_glMakeContextCurrent(renderer->shaderContext);
 	FNA3D_LogInfo("MojoShader Profile: %s", renderer->shaderProfile);

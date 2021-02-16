@@ -1,6 +1,6 @@
 /* FNA3D - 3D Graphics Library for FNA
  *
- * Copyright (c) 2020 Ethan Lee
+ * Copyright (c) 2020-2021 Ethan Lee
  *
  * This software is provided 'as-is', without any express or implied warranty.
  * In no event will the authors be held liable for any damages arising from
@@ -2796,7 +2796,7 @@ static void METAL_SetRenderTargets(
 	renderer->currentSampleCount = 0;
 
 	/* Bind the backbuffer, if applicable */
-	if (renderTargets == NULL)
+	if (numRenderTargets <= 0)
 	{
 		bb = renderer->backbuffer;
 		renderer->currentAttachments[0] = bb->colorBuffer;
@@ -3958,6 +3958,59 @@ static void METAL_GetIndexBufferData(
 
 /* Effects */
 
+static void METAL_INTERNAL_DeleteShader(void* shader)
+{
+	MOJOSHADER_mtlShader *mtlShader = (MOJOSHADER_mtlShader*) shader;
+	const MOJOSHADER_parseData *pd;
+	MetalRenderer *renderer;
+	PackedRenderPipelineArray *pArr;
+	PackedVertexBufferBindingsArray *vArr;
+	int32_t i;
+
+	pd = MOJOSHADER_mtlGetShaderParseData(mtlShader);
+	renderer = (MetalRenderer*) pd->malloc_data;
+	pArr = &renderer->pipelineStateCache;
+	vArr = &renderer->vertexDescriptorCache;
+
+	/* Run through the caches in reverse order, to minimize the damage of
+	 * doing memmove a bunch of times. Also, do the pipeline cache first,
+	 * as they are dependent on the vertex descriptors.
+	 */
+
+	for (i = pArr->count - 1; i >= 0; i -= 1)
+	{
+		const PackedRenderPipelineMap *elem = &pArr->elements[i];
+		if (	shader == elem->key.vshader ||
+			shader == elem->key.pshader	)
+		{
+			objc_release(elem->value);
+			SDL_memmove(
+				pArr->elements + i,
+				pArr->elements + i + 1,
+				sizeof(PackedRenderPipelineMap) * (pArr->count - i - 1)
+			);
+			pArr->count -= 1;
+		}
+	}
+
+	for (i = vArr->count - 1; i >= 0; i -= 1)
+	{
+		const PackedVertexBufferBindingsMap *elem = &vArr->elements[i];
+		if (elem->key.vertexShader == shader)
+		{
+			objc_release(elem->value);
+			SDL_memmove(
+				vArr->elements + i,
+				vArr->elements + i + 1,
+				sizeof(PackedVertexBufferBindingsMap) * (vArr->count - i - 1)
+			);
+			vArr->count -= 1;
+		}
+	}
+
+	MOJOSHADER_mtlDeleteShader(mtlShader);
+}
+
 static void METAL_CreateEffect(
 	FNA3D_Renderer *driverData,
 	uint8_t *effectCode,
@@ -3971,7 +4024,7 @@ static void METAL_CreateEffect(
 
 	shaderBackend.compileShader = (MOJOSHADER_compileShaderFunc) MOJOSHADER_mtlCompileShader;
 	shaderBackend.shaderAddRef = (MOJOSHADER_shaderAddRefFunc) MOJOSHADER_mtlShaderAddRef;
-	shaderBackend.deleteShader = (MOJOSHADER_deleteShaderFunc) MOJOSHADER_mtlDeleteShader;
+	shaderBackend.deleteShader = METAL_INTERNAL_DeleteShader;
 	shaderBackend.getParseData = (MOJOSHADER_getParseDataFunc) MOJOSHADER_mtlGetShaderParseData;
 	shaderBackend.bindShaders = (MOJOSHADER_bindShadersFunc) MOJOSHADER_mtlBindShaders;
 	shaderBackend.getBoundShaders = (MOJOSHADER_getBoundShadersFunc) MOJOSHADER_mtlGetBoundShaders;
@@ -3980,7 +4033,7 @@ static void METAL_CreateEffect(
 	shaderBackend.getError = MOJOSHADER_mtlGetError;
 	shaderBackend.m = NULL;
 	shaderBackend.f = NULL;
-	shaderBackend.malloc_data = NULL;
+	shaderBackend.malloc_data = driverData;
 
 	*effectData = MOJOSHADER_compileEffect(
 		effectCode,
@@ -4279,6 +4332,42 @@ static void METAL_SetStringMarker(FNA3D_Renderer *driverData, const char *text)
 	}
 }
 
+/* External Interop */
+
+static void METAL_GetSysRenderer(
+	FNA3D_Renderer *driverData,
+	FNA3D_SysRendererEXT *sysrenderer
+) {
+	MetalRenderer *renderer = (MetalRenderer*) driverData;
+
+	sysrenderer->rendererType = FNA3D_RENDERER_TYPE_METAL_EXT;
+	sysrenderer->renderer.metal.device = renderer->device;
+	sysrenderer->renderer.metal.view = renderer->view;
+}
+
+static FNA3D_Texture* METAL_CreateSysTexture(
+	FNA3D_Renderer *driverData,
+	FNA3D_SysTextureEXT *systexture
+) {
+	MetalTexture *result;
+
+	if (systexture->rendererType != FNA3D_RENDERER_TYPE_METAL_EXT)
+	{
+		return NULL;
+	}
+
+	result = (MetalTexture*) SDL_malloc(sizeof(MetalTexture));
+	SDL_zerop(result);
+
+	result->handle = (MTLTexture*) systexture->texture.metal.handle;
+	result->hasMipmaps = mtlGetTextureLevelCount(result->handle) > 1;
+
+	/* Everything else either happens to be 0 or is unused anyway! */
+
+	objc_retain(result->handle);
+	return (FNA3D_Texture*) result;
+}
+
 /* Driver */
 
 static uint8_t METAL_PrepareWindowAttributes(uint32_t *flags)
@@ -4552,7 +4641,7 @@ FNA3D_Device* METAL_CreateDevice(
 		renderer->device,
 		NULL,
 		NULL,
-		NULL
+		renderer
 	);
 	MOJOSHADER_mtlMakeContextCurrent(renderer->mtlContext);
 

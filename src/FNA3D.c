@@ -1,6 +1,6 @@
 /* FNA3D - 3D Graphics Library for FNA
  *
- * Copyright (c) 2020 Ethan Lee
+ * Copyright (c) 2020-2021 Ethan Lee
  *
  * This software is provided 'as-is', without any express or implied warranty.
  * In no event will the authors be held liable for any damages arising from
@@ -25,8 +25,13 @@
  */
 
 #include "FNA3D_Driver.h"
+#include "FNA3D_Tracing.h"
 
 #include <SDL.h>
+
+#if !SDL_VERSION_ATLEAST(2, 0, 12)
+#error "SDL version older than 2.0.12"
+#endif /* !SDL_VERSION_ATLEAST */
 
 /* Drivers */
 
@@ -184,6 +189,7 @@ FNA3D_Device* FNA3D_CreateDevice(
 	FNA3D_PresentationParameters *presentationParameters,
 	uint8_t debugMode
 ) {
+	TRACE_CREATEDEVICE
 	if (selectedDriver < 0)
 	{
 		FNA3D_LogError("Call FNA3D_PrepareWindowAttributes first!");
@@ -198,6 +204,7 @@ FNA3D_Device* FNA3D_CreateDevice(
 
 void FNA3D_DestroyDevice(FNA3D_Device *device)
 {
+	TRACE_DESTROYDEVICE
 	if (device == NULL)
 	{
 		return;
@@ -214,6 +221,7 @@ void FNA3D_SwapBuffers(
 	FNA3D_Rect *destinationRectangle,
 	void* overrideWindowHandle
 ) {
+	TRACE_SWAPBUFFERS
 	if (device == NULL)
 	{
 		return;
@@ -235,6 +243,7 @@ void FNA3D_Clear(
 	float depth,
 	int32_t stencil
 ) {
+	TRACE_CLEAR
 	if (device == NULL)
 	{
 		return;
@@ -253,6 +262,7 @@ void FNA3D_DrawIndexedPrimitives(
 	FNA3D_Buffer *indices,
 	FNA3D_IndexElementSize indexElementSize
 ) {
+	TRACE_DRAWINDEXEDPRIMITIVES
 	if (device == NULL)
 	{
 		return;
@@ -282,6 +292,7 @@ void FNA3D_DrawInstancedPrimitives(
 	FNA3D_Buffer *indices,
 	FNA3D_IndexElementSize indexElementSize
 ) {
+	TRACE_DRAWINSTANCEDPRIMITIVES
 	if (device == NULL)
 	{
 		return;
@@ -306,6 +317,7 @@ void FNA3D_DrawPrimitives(
 	int32_t vertexStart,
 	int32_t primitiveCount
 ) {
+	TRACE_DRAWPRIMITIVES
 	if (device == NULL)
 	{
 		return;
@@ -322,6 +334,7 @@ void FNA3D_DrawPrimitives(
 
 void FNA3D_SetViewport(FNA3D_Device *device, FNA3D_Viewport *viewport)
 {
+	TRACE_SETVIEWPORT
 	if (device == NULL)
 	{
 		return;
@@ -331,6 +344,7 @@ void FNA3D_SetViewport(FNA3D_Device *device, FNA3D_Viewport *viewport)
 
 void FNA3D_SetScissorRect(FNA3D_Device *device, FNA3D_Rect *scissor)
 {
+	TRACE_SETSCISSORRECT
 	if (device == NULL)
 	{
 		return;
@@ -342,6 +356,7 @@ void FNA3D_GetBlendFactor(
 	FNA3D_Device *device,
 	FNA3D_Color *blendFactor
 ) {
+	/* Not traced! */
 	if (device == NULL)
 	{
 		return;
@@ -353,6 +368,7 @@ void FNA3D_SetBlendFactor(
 	FNA3D_Device *device,
 	FNA3D_Color *blendFactor
 ) {
+	TRACE_SETBLENDFACTOR
 	if (device == NULL)
 	{
 		return;
@@ -362,6 +378,7 @@ void FNA3D_SetBlendFactor(
 
 int32_t FNA3D_GetMultiSampleMask(FNA3D_Device *device)
 {
+	/* Not traced! */
 	if (device == NULL)
 	{
 		return 0;
@@ -371,6 +388,7 @@ int32_t FNA3D_GetMultiSampleMask(FNA3D_Device *device)
 
 void FNA3D_SetMultiSampleMask(FNA3D_Device *device, int32_t mask)
 {
+	TRACE_SETMULTISAMPLEMASK
 	if (device == NULL)
 	{
 		return;
@@ -380,6 +398,7 @@ void FNA3D_SetMultiSampleMask(FNA3D_Device *device, int32_t mask)
 
 int32_t FNA3D_GetReferenceStencil(FNA3D_Device *device)
 {
+	/* Not traced! */
 	if (device == NULL)
 	{
 		return 0;
@@ -389,6 +408,7 @@ int32_t FNA3D_GetReferenceStencil(FNA3D_Device *device)
 
 void FNA3D_SetReferenceStencil(FNA3D_Device *device, int32_t ref)
 {
+	TRACE_SETREFERENCESTENCIL
 	if (device == NULL)
 	{
 		return;
@@ -402,6 +422,7 @@ void FNA3D_SetBlendState(
 	FNA3D_Device *device,
 	FNA3D_BlendState *blendState
 ) {
+	TRACE_SETBLENDSTATE
 	if (device == NULL)
 	{
 		return;
@@ -413,6 +434,7 @@ void FNA3D_SetDepthStencilState(
 	FNA3D_Device *device,
 	FNA3D_DepthStencilState *depthStencilState
 ) {
+	TRACE_SETDEPTHSTENCILSTATE
 	if (device == NULL)
 	{
 		return;
@@ -424,6 +446,7 @@ void FNA3D_ApplyRasterizerState(
 	FNA3D_Device *device,
 	FNA3D_RasterizerState *rasterizerState
 ) {
+	TRACE_APPLYRASTERIZERSTATE
 	if (device == NULL)
 	{
 		return;
@@ -437,6 +460,7 @@ void FNA3D_VerifySampler(
 	FNA3D_Texture *texture,
 	FNA3D_SamplerState *sampler
 ) {
+	TRACE_VERIFYSAMPLER
 	if (device == NULL)
 	{
 		return;
@@ -450,6 +474,7 @@ void FNA3D_VerifyVertexSampler(
 	FNA3D_Texture *texture,
 	FNA3D_SamplerState *sampler
 ) {
+	TRACE_VERIFYVERTEXSAMPLER
 	if (device == NULL)
 	{
 		return;
@@ -464,6 +489,7 @@ void FNA3D_ApplyVertexBufferBindings(
 	uint8_t bindingsUpdated,
 	int32_t baseVertex
 ) {
+	TRACE_APPLYVERTEXBUFFERBINDINGS
 	if (device == NULL)
 	{
 		return;
@@ -487,6 +513,7 @@ void FNA3D_SetRenderTargets(
 	FNA3D_DepthFormat depthFormat,
 	uint8_t preserveTargetContents
 ) {
+	TRACE_SETRENDERTARGETS
 	if (device == NULL)
 	{
 		return;
@@ -505,6 +532,7 @@ void FNA3D_ResolveTarget(
 	FNA3D_Device *device,
 	FNA3D_RenderTargetBinding *target
 ) {
+	TRACE_RESOLVETARGET
 	if (device == NULL)
 	{
 		return;
@@ -518,6 +546,7 @@ void FNA3D_ResetBackbuffer(
 	FNA3D_Device *device,
 	FNA3D_PresentationParameters *presentationParameters
 ) {
+	TRACE_RESETBACKBUFFER
 	if (device == NULL)
 	{
 		return;
@@ -534,6 +563,7 @@ void FNA3D_ReadBackbuffer(
 	void* data,
 	int32_t dataLength
 ) {
+	TRACE_READBACKBUFFER
 	if (device == NULL)
 	{
 		return;
@@ -554,6 +584,7 @@ void FNA3D_GetBackbufferSize(
 	int32_t *w,
 	int32_t *h
 ) {
+	/* Not traced! */
 	if (device == NULL)
 	{
 		*w = 0;
@@ -565,6 +596,7 @@ void FNA3D_GetBackbufferSize(
 
 FNA3D_SurfaceFormat FNA3D_GetBackbufferSurfaceFormat(FNA3D_Device *device)
 {
+	/* Not traced! */
 	if (device == NULL)
 	{
 		return FNA3D_SURFACEFORMAT_COLOR;
@@ -574,6 +606,7 @@ FNA3D_SurfaceFormat FNA3D_GetBackbufferSurfaceFormat(FNA3D_Device *device)
 
 FNA3D_DepthFormat FNA3D_GetBackbufferDepthFormat(FNA3D_Device *device)
 {
+	/* Not traced! */
 	if (device == NULL)
 	{
 		return FNA3D_DEPTHFORMAT_NONE;
@@ -583,6 +616,7 @@ FNA3D_DepthFormat FNA3D_GetBackbufferDepthFormat(FNA3D_Device *device)
 
 int32_t FNA3D_GetBackbufferMultiSampleCount(FNA3D_Device *device)
 {
+	/* Not traced! */
 	if (device == NULL)
 	{
 		return 0;
@@ -600,11 +634,15 @@ FNA3D_Texture* FNA3D_CreateTexture2D(
 	int32_t levelCount,
 	uint8_t isRenderTarget
 ) {
+	/* We're stuck tracing _after_ the call instead of _before_, because
+	 * of threading issues. This can cause timing issues!
+	 */
+	FNA3D_Texture *result;
 	if (device == NULL)
 	{
 		return NULL;
 	}
-	return device->CreateTexture2D(
+	result = device->CreateTexture2D(
 		device->driverData,
 		format,
 		width,
@@ -612,6 +650,8 @@ FNA3D_Texture* FNA3D_CreateTexture2D(
 		levelCount,
 		isRenderTarget
 	);
+	TRACE_CREATETEXTURE2D
+	return result;
 }
 
 FNA3D_Texture* FNA3D_CreateTexture3D(
@@ -622,11 +662,15 @@ FNA3D_Texture* FNA3D_CreateTexture3D(
 	int32_t depth,
 	int32_t levelCount
 ) {
+	/* We're stuck tracing _after_ the call instead of _before_, because
+	 * of threading issues. This can cause timing issues!
+	 */
+	FNA3D_Texture *result;
 	if (device == NULL)
 	{
 		return NULL;
 	}
-	return device->CreateTexture3D(
+	result = device->CreateTexture3D(
 		device->driverData,
 		format,
 		width,
@@ -634,6 +678,8 @@ FNA3D_Texture* FNA3D_CreateTexture3D(
 		depth,
 		levelCount
 	);
+	TRACE_CREATETEXTURE3D
+	return result;
 }
 
 FNA3D_Texture* FNA3D_CreateTextureCube(
@@ -643,23 +689,30 @@ FNA3D_Texture* FNA3D_CreateTextureCube(
 	int32_t levelCount,
 	uint8_t isRenderTarget
 ) {
+	/* We're stuck tracing _after_ the call instead of _before_, because
+	 * of threading issues. This can cause timing issues!
+	 */
+	FNA3D_Texture *result;
 	if (device == NULL)
 	{
 		return NULL;
 	}
-	return device->CreateTextureCube(
+	result = device->CreateTextureCube(
 		device->driverData,
 		format,
 		size,
 		levelCount,
 		isRenderTarget
 	);
+	TRACE_CREATETEXTURECUBE
+	return result;
 }
 
 void FNA3D_AddDisposeTexture(
 	FNA3D_Device *device,
 	FNA3D_Texture *texture
 ) {
+	TRACE_ADDDISPOSETEXTURE
 	if (device == NULL || texture == NULL)
 	{
 		return;
@@ -678,6 +731,7 @@ void FNA3D_SetTextureData2D(
 	void* data,
 	int32_t dataLength
 ) {
+	TRACE_SETTEXTUREDATA2D
 	if (device == NULL)
 	{
 		return;
@@ -708,6 +762,7 @@ void FNA3D_SetTextureData3D(
 	void* data,
 	int32_t dataLength
 ) {
+	TRACE_SETTEXTUREDATA3D
 	if (device == NULL)
 	{
 		return;
@@ -739,6 +794,7 @@ void FNA3D_SetTextureDataCube(
 	void* data,
 	int32_t dataLength
 ) {
+	TRACE_SETTEXTUREDATACUBE
 	if (device == NULL)
 	{
 		return;
@@ -769,6 +825,7 @@ void FNA3D_SetTextureDataYUV(
 	void* data,
 	int32_t dataLength
 ) {
+	TRACE_SETTEXTUREDATAYUV
 	if (device == NULL)
 	{
 		return;
@@ -798,6 +855,7 @@ void FNA3D_GetTextureData2D(
 	void* data,
 	int32_t dataLength
 ) {
+	TRACE_GETTEXTUREDATA2D
 	if (device == NULL)
 	{
 		return;
@@ -828,6 +886,7 @@ void FNA3D_GetTextureData3D(
 	void* data,
 	int32_t dataLength
 ) {
+	TRACE_SETTEXTUREDATA3D
 	if (device == NULL)
 	{
 		return;
@@ -859,6 +918,7 @@ void FNA3D_GetTextureDataCube(
 	void* data,
 	int32_t dataLength
 ) {
+	TRACE_GETTEXTUREDATACUBE
 	if (device == NULL)
 	{
 		return;
@@ -887,11 +947,15 @@ FNA3D_Renderbuffer* FNA3D_GenColorRenderbuffer(
 	int32_t multiSampleCount,
 	FNA3D_Texture *texture
 ) {
+	/* We're stuck tracing _after_ the call instead of _before_, because
+	 * of threading issues. This can cause timing issues!
+	 */
+	FNA3D_Renderbuffer *result;
 	if (device == NULL)
 	{
 		return NULL;
 	}
-	return device->GenColorRenderbuffer(
+	result = device->GenColorRenderbuffer(
 		device->driverData,
 		width,
 		height,
@@ -899,6 +963,8 @@ FNA3D_Renderbuffer* FNA3D_GenColorRenderbuffer(
 		multiSampleCount,
 		texture
 	);
+	TRACE_GENCOLORRENDERBUFFER
+	return result;
 }
 
 FNA3D_Renderbuffer* FNA3D_GenDepthStencilRenderbuffer(
@@ -908,23 +974,30 @@ FNA3D_Renderbuffer* FNA3D_GenDepthStencilRenderbuffer(
 	FNA3D_DepthFormat format,
 	int32_t multiSampleCount
 ) {
+	/* We're stuck tracing _after_ the call instead of _before_, because
+	 * of threading issues. This can cause timing issues!
+	 */
+	FNA3D_Renderbuffer *result;
 	if (device == NULL)
 	{
 		return NULL;
 	}
-	return device->GenDepthStencilRenderbuffer(
+	result = device->GenDepthStencilRenderbuffer(
 		device->driverData,
 		width,
 		height,
 		format,
 		multiSampleCount
 	);
+	TRACE_GENDEPTHSTENCILRENDERBUFFER
+	return result;
 }
 
 void FNA3D_AddDisposeRenderbuffer(
 	FNA3D_Device *device,
 	FNA3D_Renderbuffer *renderbuffer
 ) {
+	TRACE_ADDDISPOSERENDERBUFFER
 	if (device == NULL || renderbuffer == NULL)
 	{
 		return;
@@ -943,22 +1016,29 @@ FNA3D_Buffer* FNA3D_GenVertexBuffer(
 	FNA3D_BufferUsage usage,
 	int32_t sizeInBytes
 ) {
+	/* We're stuck tracing _after_ the call instead of _before_, because
+	 * of threading issues. This can cause timing issues!
+	 */
+	FNA3D_Buffer *result;
 	if (device == NULL)
 	{
 		return NULL;
 	}
-	return device->GenVertexBuffer(
+	result = device->GenVertexBuffer(
 		device->driverData,
 		dynamic,
 		usage,
 		sizeInBytes
 	);
+	TRACE_GENVERTEXBUFFER
+	return result;
 }
 
 void FNA3D_AddDisposeVertexBuffer(
 	FNA3D_Device *device,
 	FNA3D_Buffer *buffer
 ) {
+	TRACE_ADDDISPOSEVERTEXBUFFER
 	if (device == NULL || buffer == NULL)
 	{
 		return;
@@ -976,6 +1056,7 @@ void FNA3D_SetVertexBufferData(
 	int32_t vertexStride,
 	FNA3D_SetDataOptions options
 ) {
+	TRACE_SETVERTEXBUFFERDATA
 	if (device == NULL)
 	{
 		return;
@@ -1001,6 +1082,7 @@ void FNA3D_GetVertexBufferData(
 	int32_t elementSizeInBytes,
 	int32_t vertexStride
 ) {
+	TRACE_GETVERTEXBUFFERDATA
 	if (device == NULL)
 	{
 		return;
@@ -1024,22 +1106,29 @@ FNA3D_Buffer* FNA3D_GenIndexBuffer(
 	FNA3D_BufferUsage usage,
 	int32_t sizeInBytes
 ) {
+	/* We're stuck tracing _after_ the call instead of _before_, because
+	 * of threading issues. This can cause timing issues!
+	 */
+	FNA3D_Buffer *result;
 	if (device == NULL)
 	{
 		return NULL;
 	}
-	return device->GenIndexBuffer(
+	result = device->GenIndexBuffer(
 		device->driverData,
 		dynamic,
 		usage,
 		sizeInBytes
 	);
+	TRACE_GENINDEXBUFFER
+	return result;
 }
 
 void FNA3D_AddDisposeIndexBuffer(
 	FNA3D_Device *device,
 	FNA3D_Buffer *buffer
 ) {
+	TRACE_ADDDISPOSEINDEXBUFFER
 	if (device == NULL || buffer == NULL)
 	{
 		return;
@@ -1055,6 +1144,7 @@ void FNA3D_SetIndexBufferData(
 	int32_t dataLength,
 	FNA3D_SetDataOptions options
 ) {
+	TRACE_SETINDEXBUFFERDATA
 	if (device == NULL)
 	{
 		return;
@@ -1076,6 +1166,7 @@ void FNA3D_GetIndexBufferData(
 	void* data,
 	int32_t dataLength
 ) {
+	TRACE_GETINDEXBUFFERDATA
 	if (device == NULL)
 	{
 		return;
@@ -1098,6 +1189,9 @@ void FNA3D_CreateEffect(
 	FNA3D_Effect **effect,
 	MOJOSHADER_effect **effectData
 ) {
+	/* We're stuck tracing _after_ the call instead of _before_, because
+	 * of threading issues. This can cause timing issues!
+	 */
 	if (device == NULL)
 	{
 		*effect = NULL;
@@ -1111,6 +1205,7 @@ void FNA3D_CreateEffect(
 		effect,
 		effectData
 	);
+	TRACE_CREATEEFFECT
 }
 
 void FNA3D_CloneEffect(
@@ -1119,6 +1214,9 @@ void FNA3D_CloneEffect(
 	FNA3D_Effect **effect,
 	MOJOSHADER_effect **effectData
 ) {
+	/* We're stuck tracing _after_ the call instead of _before_, because
+	 * of threading issues. This can cause timing issues!
+	 */
 	if (device == NULL)
 	{
 		*effect = NULL;
@@ -1131,12 +1229,14 @@ void FNA3D_CloneEffect(
 		effect,
 		effectData
 	);
+	TRACE_CLONEEFFECT
 }
 
 void FNA3D_AddDisposeEffect(
 	FNA3D_Device *device,
 	FNA3D_Effect *effect
 ) {
+	TRACE_ADDDISPOSEEFFECT
 	if (device == NULL || effect == NULL)
 	{
 		return;
@@ -1149,6 +1249,7 @@ void FNA3D_SetEffectTechnique(
 	FNA3D_Effect *effect,
 	MOJOSHADER_effectTechnique *technique
 ) {
+	TRACE_SETEFFECTTECHNIQUE
 	if (device == NULL)
 	{
 		return;
@@ -1162,6 +1263,7 @@ void FNA3D_ApplyEffect(
 	uint32_t pass,
 	MOJOSHADER_effectStateChanges *stateChanges
 ) {
+	TRACE_APPLYEFFECT
 	if (device == NULL)
 	{
 		return;
@@ -1179,6 +1281,7 @@ void FNA3D_BeginPassRestore(
 	FNA3D_Effect *effect,
 	MOJOSHADER_effectStateChanges *stateChanges
 ) {
+	TRACE_BEGINPASSRESTORE
 	if (device == NULL)
 	{
 		return;
@@ -1194,6 +1297,7 @@ void FNA3D_EndPassRestore(
 	FNA3D_Device *device,
 	FNA3D_Effect *effect
 ) {
+	TRACE_ENDPASSRESTORE
 	if (device == NULL)
 	{
 		return;
@@ -1205,15 +1309,22 @@ void FNA3D_EndPassRestore(
 
 FNA3D_Query* FNA3D_CreateQuery(FNA3D_Device *device)
 {
+	/* We're stuck tracing _after_ the call instead of _before_, because
+	 * of threading issues. This can cause timing issues!
+	 */
+	FNA3D_Query *result;
 	if (device == NULL)
 	{
 		return NULL;
 	}
-	return device->CreateQuery(device->driverData);
+	result = device->CreateQuery(device->driverData);
+	TRACE_CREATEQUERY
+	return result;
 }
 
 void FNA3D_AddDisposeQuery(FNA3D_Device *device, FNA3D_Query *query)
 {
+	TRACE_ADDDISPOSEQUERY
 	if (device == NULL || query == NULL)
 	{
 		return;
@@ -1223,6 +1334,7 @@ void FNA3D_AddDisposeQuery(FNA3D_Device *device, FNA3D_Query *query)
 
 void FNA3D_QueryBegin(FNA3D_Device *device, FNA3D_Query *query)
 {
+	TRACE_QUERYBEGIN
 	if (device == NULL)
 	{
 		return;
@@ -1232,6 +1344,7 @@ void FNA3D_QueryBegin(FNA3D_Device *device, FNA3D_Query *query)
 
 void FNA3D_QueryEnd(FNA3D_Device *device, FNA3D_Query *query)
 {
+	TRACE_QUERYEND
 	if (device == NULL)
 	{
 		return;
@@ -1241,6 +1354,7 @@ void FNA3D_QueryEnd(FNA3D_Device *device, FNA3D_Query *query)
 
 uint8_t FNA3D_QueryComplete(FNA3D_Device *device, FNA3D_Query *query)
 {
+	/* Not traced! */
 	if (device == NULL)
 	{
 		return 1;
@@ -1252,6 +1366,7 @@ int32_t FNA3D_QueryPixelCount(
 	FNA3D_Device *device,
 	FNA3D_Query *query
 ) {
+	TRACE_QUERYPIXELCOUNT
 	if (device == NULL)
 	{
 		return 0;
@@ -1263,6 +1378,7 @@ int32_t FNA3D_QueryPixelCount(
 
 uint8_t FNA3D_SupportsDXT1(FNA3D_Device *device)
 {
+	/* Not traced! */
 	if (device == NULL)
 	{
 		return 0;
@@ -1272,6 +1388,7 @@ uint8_t FNA3D_SupportsDXT1(FNA3D_Device *device)
 
 uint8_t FNA3D_SupportsS3TC(FNA3D_Device *device)
 {
+	/* Not traced! */
 	if (device == NULL)
 	{
 		return 0;
@@ -1281,6 +1398,7 @@ uint8_t FNA3D_SupportsS3TC(FNA3D_Device *device)
 
 uint8_t FNA3D_SupportsHardwareInstancing(FNA3D_Device *device)
 {
+	/* Not traced! */
 	if (device == NULL)
 	{
 		return 0;
@@ -1290,6 +1408,7 @@ uint8_t FNA3D_SupportsHardwareInstancing(FNA3D_Device *device)
 
 uint8_t FNA3D_SupportsNoOverwrite(FNA3D_Device *device)
 {
+	/* Not traced! */
 	if (device == NULL)
 	{
 		return 0;
@@ -1302,6 +1421,7 @@ void FNA3D_GetMaxTextureSlots(
 	int32_t *textures,
 	int32_t *vertexTextures
 ) {
+	/* Not traced! */
 	if (device == NULL)
 	{
 		return;
@@ -1318,6 +1438,7 @@ int32_t FNA3D_GetMaxMultiSampleCount(
 	FNA3D_SurfaceFormat format,
 	int32_t multiSampleCount
 ) {
+	/* Not traced! */
 	if (device == NULL)
 	{
 		return 0;
@@ -1333,11 +1454,52 @@ int32_t FNA3D_GetMaxMultiSampleCount(
 
 void FNA3D_SetStringMarker(FNA3D_Device *device, const char *text)
 {
+	TRACE_SETSTRINGMARKER
 	if (device == NULL)
 	{
 		return;
 	}
 	device->SetStringMarker(device->driverData, text);
+}
+
+/* External Interop */
+
+void FNA3D_GetSysRendererEXT(
+	FNA3D_Device *device,
+	FNA3D_SysRendererEXT *sysrenderer
+) {
+#ifdef FNA3D_TRACING
+	SDL_assert(0 && "Tracing does not support SysRendererEXT!");
+#endif
+	if (	device == NULL ||
+		sysrenderer == NULL ||
+		sysrenderer->version != FNA3D_SYSRENDERER_VERSION_EXT	)
+	{
+		return;
+	}
+	device->GetSysRenderer(
+		device->driverData,
+		sysrenderer
+	);
+}
+
+FNA3D_Texture* FNA3D_CreateSysTextureEXT(
+	FNA3D_Device *device,
+	FNA3D_SysTextureEXT *systexture
+) {
+#ifdef FNA3D_TRACING
+	SDL_assert(0 && "Tracing does not support SysTextureEXT!");
+#endif
+	if (	device == NULL ||
+		systexture == NULL ||
+		systexture->version != FNA3D_SYSRENDERER_VERSION_EXT	)
+	{
+		return NULL;
+	}
+	return device->CreateSysTexture(
+		device->driverData,
+		systexture
+	);
 }
 
 /* vim: set noexpandtab shiftwidth=8 tabstop=8: */

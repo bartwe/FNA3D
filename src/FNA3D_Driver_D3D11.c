@@ -1,6 +1,6 @@
 /* FNA3D - 3D Graphics Library for FNA
  *
- * Copyright (c) 2020 Ethan Lee
+ * Copyright (c) 2020-2021 Ethan Lee
  *
  * This software is provided 'as-is', without any express or implied warranty.
  * In no event will the authors be held liable for any damages arising from
@@ -2223,7 +2223,7 @@ static void D3D11_SetRenderTargets(
 	int32_t i;
 
 	/* Bind the backbuffer, if applicable */
-	if (renderTargets == NULL)
+	if (renderTargetCount <= 0)
 	{
 		views[0] = renderer->backbuffer.colorView;
 		renderer->currentDepthFormat = renderer->backbuffer.depthFormat;
@@ -4052,6 +4052,41 @@ static void D3D11_GetIndexBufferData(
 
 /* Effects */
 
+static void D3D11_INTERNAL_DeleteShader(void* shader)
+{
+	MOJOSHADER_d3d11Shader *d3dShader = (MOJOSHADER_d3d11Shader*) shader;
+	const MOJOSHADER_parseData *pd;
+	D3D11Renderer *renderer;
+	PackedVertexBufferBindingsArray *arr;
+	int32_t i;
+
+	pd = MOJOSHADER_d3d11GetShaderParseData(d3dShader);
+	renderer = (D3D11Renderer*) pd->malloc_data;
+	arr = &renderer->inputLayoutCache;
+
+	/* Run through input layout cache in reverse order, to minimize the
+	 * damage of doing memmove a bunch of times
+	 */
+	for (i = arr->count - 1; i >= 0; i -= 1)
+	{
+		const PackedVertexBufferBindingsMap *elem = &arr->elements[i];
+		if (elem->key.vertexShader == shader)
+		{
+			ID3D11InputLayout_Release(
+				(ID3D11InputLayout*) elem->value
+			);
+			SDL_memmove(
+				arr->elements + i,
+				arr->elements + i + 1,
+				sizeof(PackedVertexBufferBindingsMap) * (arr->count - i - 1)
+			);
+			arr->count -= 1;
+		}
+	}
+
+	MOJOSHADER_d3d11DeleteShader(d3dShader);
+}
+
 static void D3D11_CreateEffect(
 	FNA3D_Renderer *driverData,
 	uint8_t *effectCode,
@@ -4065,7 +4100,7 @@ static void D3D11_CreateEffect(
 
 	shaderBackend.compileShader = (MOJOSHADER_compileShaderFunc) MOJOSHADER_d3d11CompileShader;
 	shaderBackend.shaderAddRef = (MOJOSHADER_shaderAddRefFunc) MOJOSHADER_d3d11ShaderAddRef;
-	shaderBackend.deleteShader = (MOJOSHADER_deleteShaderFunc) MOJOSHADER_d3d11DeleteShader;
+	shaderBackend.deleteShader = D3D11_INTERNAL_DeleteShader;
 	shaderBackend.getParseData = (MOJOSHADER_getParseDataFunc) MOJOSHADER_d3d11GetShaderParseData;
 	shaderBackend.bindShaders = (MOJOSHADER_bindShadersFunc) MOJOSHADER_d3d11BindShaders;
 	shaderBackend.getBoundShaders = (MOJOSHADER_getBoundShadersFunc) MOJOSHADER_d3d11GetBoundShaders;
@@ -4074,7 +4109,7 @@ static void D3D11_CreateEffect(
 	shaderBackend.getError = MOJOSHADER_d3d11GetError;
 	shaderBackend.m = NULL;
 	shaderBackend.f = NULL;
-	shaderBackend.malloc_data = NULL;
+	shaderBackend.malloc_data = driverData;
 
 	*effectData = MOJOSHADER_compileEffect(
 		effectCode,
@@ -4414,6 +4449,43 @@ static void D3D11_SetStringMarker(FNA3D_Renderer *driverData, const char *text)
 		renderer->annotation,
 		wstr
 	);
+}
+
+/* External Interop */
+
+static void D3D11_GetSysRenderer(
+	FNA3D_Renderer *driverData,
+	FNA3D_SysRendererEXT *sysrenderer
+) {
+	D3D11Renderer *renderer = (D3D11Renderer*) driverData;
+
+	sysrenderer->rendererType = FNA3D_RENDERER_TYPE_D3D11_EXT;
+	sysrenderer->renderer.d3d11.device = renderer->device;
+	sysrenderer->renderer.d3d11.context = renderer->context;
+}
+
+static FNA3D_Texture* D3D11_CreateSysTexture(
+	FNA3D_Renderer *driverData,
+	FNA3D_SysTextureEXT *systexture
+) {
+	D3D11Texture *result;
+
+	if (systexture->rendererType != FNA3D_RENDERER_TYPE_D3D11_EXT)
+	{
+		return NULL;
+	}
+
+	result = (D3D11Texture*) SDL_malloc(sizeof(D3D11Texture));
+	SDL_zerop(result);
+
+	result->handle = (ID3D11Resource*) systexture->texture.d3d11.handle;
+	result->shaderView = (ID3D11ShaderResourceView*) systexture->texture.d3d11.shaderView;
+
+	/* Everything else either happens to be 0 or is unused anyway! */
+
+	IUnknown_AddRef(result->handle);
+	ID3D11ShaderResourceView_AddRef(result->shaderView);
+	return (FNA3D_Texture*) result;
 }
 
 /* Driver */
@@ -4784,7 +4856,7 @@ try_create_device:
 		renderer->context,
 		NULL,
 		NULL,
-		NULL
+		renderer
 	);
 
 	/* Initialize texture and sampler collections */

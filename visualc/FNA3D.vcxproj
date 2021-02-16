@@ -81,7 +81,8 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <IncludePath>..\..\SDL2\include;..\MojoShader;..\include;$(DXSDK_DIR)\Include;..\Vulkan-Headers\include;$(IncludePath)</IncludePath>
-    <LibraryPath>$(SolutionDir)\x64\Release;$(LibraryPath)</LibraryPath>
+    <LibraryPath>$(SolutionDir)\bin\FNA;$(LibraryPath)</LibraryPath>
+    <OutDir>$(SolutionDir)\bin\FNA</OutDir>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>

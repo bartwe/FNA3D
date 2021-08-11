@@ -30,7 +30,11 @@
 #include "FNA3D_Driver_OpenGL.h"
 
 #include <SDL.h>
+
+/* We only use this to detect UIKit, for backbuffer creation */
+#ifdef SDL_VIDEO_DRIVER_UIKIT
 #include <SDL_syswm.h>
+#endif /* SDL_VIDEO_DRIVER_UIKIT */
 
 /* Internal Structures */
 
@@ -156,6 +160,9 @@ typedef struct OpenGLRenderer /* Cast from FNA3D_Renderer* */
 	uint8_t useES3;
 	uint8_t useCoreProfile;
 
+	/* FIXME: https://github.com/KhronosGroup/EGL-Registry/pull/113 */
+	uint8_t isEGL;
+
 	/* The Faux-Backbuffer */
 	OpenGLBackbuffer *backbuffer;
 	FNA3D_DepthFormat windowDepthFormat;
@@ -167,28 +174,9 @@ typedef struct OpenGLRenderer /* Cast from FNA3D_Renderer* */
 	GLuint vao;
 
 	/* Capabilities */
-	uint8_t supports_BaseGL;
-	uint8_t supports_CoreGL;
-	uint8_t supports_3DTexture;
-	uint8_t supports_DoublePrecisionDepth;
-	uint8_t supports_OES_single_precision;
-	uint8_t supports_ARB_occlusion_query;
-	uint8_t supports_NonES3;
-	uint8_t supports_NonES3NonCore;
-	uint8_t supports_ARB_framebuffer_object;
-	uint8_t supports_EXT_framebuffer_blit;
-	uint8_t supports_EXT_framebuffer_multisample;
-	uint8_t supports_ARB_internalformat_query;
-	uint8_t supports_ARB_invalidate_subdata;
-	uint8_t supports_ARB_draw_instanced;
-	uint8_t supports_ARB_instanced_arrays;
-	uint8_t supports_ARB_draw_elements_base_vertex;
-	uint8_t supports_EXT_draw_buffers2;
-	uint8_t supports_ARB_texture_multisample;
-	uint8_t supports_KHR_debug;
-	uint8_t supports_GREMEDY_string_marker;
 	uint8_t supports_s3tc;
 	uint8_t supports_dxt1;
+	uint8_t supports_anisotropic_filtering;
 	int32_t maxMultiSampleCount;
 	int32_t maxMultiSampleCountFormat[21];
 
@@ -312,13 +300,13 @@ typedef struct OpenGLRenderer /* Cast from FNA3D_Renderer* */
 
 	/* GL entry points */
 	glfntype_glGetString glGetString; /* Loaded early! */
+	#define GL_EXT(ext) \
+		uint8_t supports_##ext;
 	#define GL_PROC(ext, ret, func, parms) \
 		glfntype_##func func;
 	#define GL_PROC_EXT(ext, fallback, ret, func, parms) \
 		glfntype_##func func;
 	#include "FNA3D_Driver_OpenGL_glfuncs.h"
-	#undef GL_PROC
-	#undef GL_PROC_EXT
 } OpenGLRenderer;
 
 /* XNA->OpenGL Translation Arrays */
@@ -571,6 +559,7 @@ static int32_t XNAToGL_VertexAttribType[] =
 static uint8_t XNAToGL_VertexAttribNormalized(FNA3D_VertexElement *element)
 {
 	return (	element->vertexElementUsage == FNA3D_VERTEXELEMENTUSAGE_COLOR ||
+			element->vertexElementFormat == FNA3D_VERTEXELEMENTFORMAT_COLOR ||
 			element->vertexElementFormat == FNA3D_VERTEXELEMENTFORMAT_NORMALIZEDSHORT2 ||
 			element->vertexElementFormat == FNA3D_VERTEXELEMENTFORMAT_NORMALIZEDSHORT4	);
 }
@@ -2324,13 +2313,16 @@ static void OPENGL_VerifySampler(
 				XNAToGL_MinMipFilter[tex->filter] :
 				XNAToGL_MinFilter[tex->filter]
 		);
-		renderer->glTexParameterf(
-			tex->target,
-			GL_TEXTURE_MAX_ANISOTROPY_EXT,
-			(tex->filter == FNA3D_TEXTUREFILTER_ANISOTROPIC) ?
-				SDL_max(tex->anisotropy, 1.0f) :
-				1.0f
-		);
+		if (renderer->supports_anisotropic_filtering)
+		{
+			renderer->glTexParameterf(
+				tex->target,
+				GL_TEXTURE_MAX_ANISOTROPY_EXT,
+				(tex->filter == FNA3D_TEXTUREFILTER_ANISOTROPIC) ?
+					SDL_max(tex->anisotropy, 1.0f) :
+					1.0f
+			);
+		}
 	}
 	if (sampler->maxMipLevel != tex->maxMipmapLevel)
 	{
@@ -3163,6 +3155,7 @@ static void OPENGL_INTERNAL_CreateBackbuffer(
 		renderer->backbuffer->width = parameters->backBufferWidth;
 		renderer->backbuffer->height = parameters->backBufferHeight;
 		renderer->backbuffer->depthFormat = renderer->windowDepthFormat;
+		renderer->backbuffer->multiSampleCount = 0;
 	}
 }
 
@@ -3257,18 +3250,16 @@ static uint8_t OPENGL_INTERNAL_ReadTargetIfApplicable(
 }
 
 static void OPENGL_INTERNAL_SetPresentationInterval(
-	FNA3D_PresentInterval presentInterval
+	FNA3D_PresentInterval presentInterval,
+	uint8_t isEGL
 ) {
-	const char *osVersion;
 	int32_t disableLateSwapTear;
 
 	if (	presentInterval == FNA3D_PRESENTINTERVAL_DEFAULT ||
 		presentInterval == FNA3D_PRESENTINTERVAL_ONE	)
 	{
-		osVersion = SDL_GetPlatform();
 		disableLateSwapTear = (
-			(SDL_strcmp(osVersion, "Mac OS X") == 0) ||
-			(SDL_strcmp(osVersion, "WinRT") == 0) ||
+			isEGL ||
 			SDL_GetHintBoolean("FNA3D_DISABLE_LATESWAPTEAR", 0)
 		);
 		if (disableLateSwapTear)
@@ -3318,7 +3309,8 @@ static void OPENGL_ResetBackbuffer(
 	OpenGLRenderer *renderer = (OpenGLRenderer*) driverData;
 	OPENGL_INTERNAL_CreateBackbuffer(renderer, presentationParameters);
 	OPENGL_INTERNAL_SetPresentationInterval(
-		presentationParameters->presentationInterval
+		presentationParameters->presentationInterval,
+		renderer->isEGL
 	);
 }
 
@@ -3507,13 +3499,16 @@ static inline OpenGLTexture* OPENGL_INTERNAL_CreateTexture(
 			XNAToGL_MinMipFilter[result->filter] :
 			XNAToGL_MinFilter[result->filter]
 	);
-	renderer->glTexParameterf(
-		result->target,
-		GL_TEXTURE_MAX_ANISOTROPY_EXT,
-		(result->filter == FNA3D_TEXTUREFILTER_ANISOTROPIC) ?
-			SDL_max(result->anisotropy, 1.0f) :
-			1.0f
-	);
+	if (renderer->supports_anisotropic_filtering)
+	{
+		renderer->glTexParameterf(
+			result->target,
+			GL_TEXTURE_MAX_ANISOTROPY_EXT,
+			(result->filter == FNA3D_TEXTUREFILTER_ANISOTROPIC) ?
+				SDL_max(result->anisotropy, 1.0f) :
+				1.0f
+		);
+	}
 	renderer->glTexParameteri(
 		result->target,
 		GL_TEXTURE_BASE_LEVEL,
@@ -5338,27 +5333,8 @@ static inline void LoadEntryPoints(
 			"OpenGL 2.1 support is required!"
 	);
 
-	renderer->supports_BaseGL = 1;
-	renderer->supports_CoreGL = 1;
-	renderer->supports_3DTexture = 1;
-	renderer->supports_DoublePrecisionDepth = 1;
-	renderer->supports_OES_single_precision = 1;
-	renderer->supports_ARB_occlusion_query = 1;
-	renderer->supports_NonES3 = 1;
-	renderer->supports_NonES3NonCore = 1;
-	renderer->supports_ARB_framebuffer_object = 1;
-	renderer->supports_EXT_framebuffer_blit = 1;
-	renderer->supports_EXT_framebuffer_multisample = 1;
-	renderer->supports_ARB_internalformat_query = 1;
-	renderer->supports_ARB_invalidate_subdata = 1;
-	renderer->supports_ARB_draw_instanced = 1;
-	renderer->supports_ARB_instanced_arrays = 1;
-	renderer->supports_ARB_draw_elements_base_vertex = 1;
-	renderer->supports_EXT_draw_buffers2 = 1;
-	renderer->supports_ARB_texture_multisample = 1;
-	renderer->supports_KHR_debug = 1;
-	renderer->supports_GREMEDY_string_marker = 1;
-
+	#define GL_EXT(ext) \
+		renderer->supports_##ext = 1;
 	#define GL_PROC(ext, ret, func, parms) \
 		renderer->func = (glfntype_##func) SDL_GL_GetProcAddress(#func); \
 		if (renderer->func == NULL) \
@@ -5379,8 +5355,6 @@ static inline void LoadEntryPoints(
 #pragma GCC diagnostic ignored "-Wpedantic"
 	#include "FNA3D_Driver_OpenGL_glfuncs.h"
 #pragma GCC diagnostic pop
-	#undef GL_PROC
-	#undef GL_PROC_EXT
 
 	/* Weeding out the GeForce FX cards... */
 	if (!renderer->supports_BaseGL)
@@ -5574,13 +5548,18 @@ static void* MOJOSHADERCALL GLGetProcAddress(const char *ep, void* d)
 static inline void CheckExtensions(
 	const char *ext,
 	uint8_t *supportsS3tc,
-	uint8_t *supportsDxt1
+	uint8_t *supportsDxt1,
+	uint8_t *supportsAnisotropicFiltering
 ) {
 	uint8_t s3tc = (
 		SDL_strstr(ext, "GL_EXT_texture_compression_s3tc") ||
 		SDL_strstr(ext, "GL_OES_texture_compression_S3TC") ||
 		SDL_strstr(ext, "GL_EXT_texture_compression_dxt3") ||
 		SDL_strstr(ext, "GL_EXT_texture_compression_dxt5")
+	);
+	uint8_t anisotropicFiltering = (
+		SDL_strstr(ext, "GL_EXT_texture_filter_anisotropic") ||
+		SDL_strstr(ext, "GL_ARB_texture_filter_anisotropic")
 	);
 
 	if (s3tc)
@@ -5590,6 +5569,10 @@ static inline void CheckExtensions(
 	if (s3tc || SDL_strstr(ext, "GL_EXT_texture_compression_dxt1"))
 	{
 		*supportsDxt1 = 1;
+	}
+	if (anisotropicFiltering)
+	{
+		*supportsAnisotropicFiltering = 1;
 	}
 }
 
@@ -5650,7 +5633,23 @@ static uint8_t OPENGL_PrepareWindowAttributes(uint32_t *flags)
 	SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
 	SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8);
 	SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
-	SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, 8);
+	if (SDL_strcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0)
+	{
+		/* FIXME: For Wayland we have to violate spec and discard alpha.
+		 * XNA backbuffers should be RGBA, but Wayland will literally
+		 * make your window transparent, which is not what we want.
+		 * Thankfully glReadPixels can still return 4-channel data, but
+		 * alpha will be missing and it wastes cycles converting. Blech.
+		 *
+		 * TODO: Ask for an EGL version of VkCompositeAlphaFlagBitsKHR.
+		 * -flibit
+		 */
+		SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, 0);
+	}
+	else
+	{
+		SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, 8);
+	}
 	SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, depthSize);
 	SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, stencilSize);
 	SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
@@ -5720,13 +5719,15 @@ FNA3D_Device* OPENGL_CreateDevice(
 ) {
 	int32_t flags;
 	int32_t depthSize, stencilSize;
-	SDL_SysWMinfo wmInfo;
 	const char *rendererStr, *versionStr, *vendorStr;
 	char driverInfo[256];
 	int32_t i;
 	int32_t numExtensions, numSamplers, numAttributes, numAttachments;
 	OpenGLRenderer *renderer;
 	FNA3D_Device *result;
+#ifdef SDL_VIDEO_DRIVER_UIKIT
+	SDL_SysWMinfo wmInfo;
+#endif /* SDL_VIDEO_DRIVER_UIKIT */
 
 	/* Create the FNA3D_Device */
 	result = (FNA3D_Device*) SDL_malloc(sizeof(FNA3D_Device));
@@ -5753,14 +5754,15 @@ FNA3D_Device* OPENGL_CreateDevice(
 	renderer->context = SDL_GL_CreateContext(
 		(SDL_Window*) presentationParameters->deviceWindowHandle
 	);
-	OPENGL_INTERNAL_SetPresentationInterval(
-		presentationParameters->presentationInterval
-	);
 
 	/* Check for a possible ES/Core context */
 	SDL_GL_GetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, &flags);
 	renderer->useES3 = (flags & SDL_GL_CONTEXT_PROFILE_ES) != 0;
 	renderer->useCoreProfile = (flags & SDL_GL_CONTEXT_PROFILE_CORE) != 0;
+
+	/* Check for EGL-based contexts */
+	renderer->isEGL = (	renderer->useES3 ||
+				SDL_strcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0	);
 
 	/* Check for a possible debug context */
 	SDL_GL_GetAttribute(SDL_GL_CONTEXT_FLAGS, &flags);
@@ -5803,19 +5805,25 @@ FNA3D_Device* OPENGL_CreateDevice(
 		renderer->windowDepthFormat = FNA3D_DEPTHFORMAT_D24S8;
 	}
 
+	/* Set the swap interval now that we know enough about the GL context */
+	OPENGL_INTERNAL_SetPresentationInterval(
+		presentationParameters->presentationInterval,
+		renderer->isEGL
+	);
+
 	/* UIKit needs special treatment for backbuffer behavior */
+#ifdef SDL_VIDEO_DRIVER_UIKIT
 	SDL_VERSION(&wmInfo.version);
 	SDL_GetWindowWMInfo(
 		(SDL_Window*) presentationParameters->deviceWindowHandle,
 		&wmInfo
 	);
-#ifdef SDL_VIDEO_UIKIT
 	if (wmInfo.subsystem == SDL_SYSWM_UIKIT)
 	{
 		renderer->realBackbufferFBO = wmInfo.info.uikit.framebuffer;
 		renderer->realBackbufferRBO = wmInfo.info.uikit.colorbuffer;
 	}
-#endif /* SDL_VIDEO_UIKIT */
+#endif /* SDL_VIDEO_DRIVER_UIKIT */
 
 	/* Print GL information */
 #pragma GCC diagnostic push
@@ -5888,6 +5896,7 @@ FNA3D_Device* OPENGL_CreateDevice(
 	/* Load the extension list, initialize extension-dependent components */
 	renderer->supports_s3tc = 0;
 	renderer->supports_dxt1 = 0;
+	renderer->supports_anisotropic_filtering = 0;
 	if (renderer->useCoreProfile)
 	{
 		renderer->glGetIntegerv(GL_NUM_EXTENSIONS, &numExtensions);
@@ -5896,7 +5905,8 @@ FNA3D_Device* OPENGL_CreateDevice(
 			CheckExtensions(
 				(const char*) renderer->glGetStringi(GL_EXTENSIONS, i),
 				&renderer->supports_s3tc,
-				&renderer->supports_dxt1
+				&renderer->supports_dxt1,
+				&renderer->supports_anisotropic_filtering
 			);
 
 			if (renderer->supports_s3tc && renderer->supports_dxt1)
@@ -5911,7 +5921,8 @@ FNA3D_Device* OPENGL_CreateDevice(
 		CheckExtensions(
 			(const char*) renderer->glGetString(GL_EXTENSIONS),
 			&renderer->supports_s3tc,
-			&renderer->supports_dxt1
+			&renderer->supports_dxt1,
+			&renderer->supports_anisotropic_filtering
 		);
 	}
 

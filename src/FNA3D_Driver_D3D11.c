@@ -1521,10 +1521,13 @@ static void D3D11_SwapBuffers(
 	/* "Blit" the faux-backbuffer to the swapchain image */
 	D3D11_INTERNAL_BlitFramebuffer(renderer, drawableWidth, drawableHeight);
 
-	SDL_UnlockMutex(renderer->ctxLock);
-
 	/* Present! */
 	IDXGISwapChain_Present(renderer->swapchain, renderer->syncInterval, 0);
+
+	/* An overlay program may seize our context and render with it, so
+	 * unlock _after_ we present so the device context is safe in that time
+	 */
+	SDL_UnlockMutex(renderer->ctxLock);
 }
 
 /* Drawing */
@@ -2074,8 +2077,11 @@ static void D3D11_ApplyVertexBufferBindings(
 	int32_t i, stride, offset;
 	uint32_t hash;
 
+	SDL_LockMutex(renderer->ctxLock);
+
 	if (!bindingsUpdated && !renderer->effectApplied)
 	{
+		SDL_UnlockMutex(renderer->ctxLock);
 		return;
 	}
 
@@ -2086,8 +2092,6 @@ static void D3D11_ApplyVertexBufferBindings(
 		numBindings,
 		&hash
 	);
-
-	SDL_LockMutex(renderer->ctxLock);
 
 	if (renderer->inputLayout != inputLayout)
 	{
@@ -2130,10 +2134,10 @@ static void D3D11_ApplyVertexBufferBindings(
 		}
 	}
 
-	SDL_UnlockMutex(renderer->ctxLock);
-
 	MOJOSHADER_d3d11ProgramReady((unsigned long long) hash);
 	renderer->effectApplied = 0;
+
+	SDL_UnlockMutex(renderer->ctxLock);
 }
 
 /* Render Targets */
@@ -2665,6 +2669,7 @@ static void D3D11_ReadBackbuffer(
 	if (renderer->backbuffer.multiSampleCount > 1)
 	{
 		/* We have to resolve the backbuffer first. */
+		SDL_LockMutex(renderer->ctxLock);
 		ID3D11DeviceContext_ResolveSubresource(
 			renderer->context,
 			(ID3D11Resource*) renderer->backbuffer.resolveBuffer,
@@ -2673,6 +2678,7 @@ static void D3D11_ReadBackbuffer(
 			0,
 			XNAToD3D_TextureFormat[renderer->backbuffer.surfaceFormat]
 		);
+		SDL_UnlockMutex(renderer->ctxLock);
 	}
 
 	/* Create a pseudo-texture we can feed to GetTextureData2D.
@@ -3522,8 +3528,10 @@ static FNA3D_Renderbuffer* D3D11_GenColorRenderbuffer(
 	desc.MipLevels = 1;
 	desc.ArraySize = 1;
 	desc.Format = XNAToD3D_TextureFormat[format];
-	desc.SampleDesc.Count = multiSampleCount;
-	desc.SampleDesc.Quality = D3D11_STANDARD_MULTISAMPLE_PATTERN;
+	desc.SampleDesc.Count = (multiSampleCount > 1 ? multiSampleCount : 1);
+	desc.SampleDesc.Quality = (
+		multiSampleCount > 1 ? D3D11_STANDARD_MULTISAMPLE_PATTERN : 0
+	);
 	desc.Usage = D3D11_USAGE_DEFAULT;
 	desc.BindFlags = D3D11_BIND_RENDER_TARGET;
 	desc.CPUAccessFlags = 0;
@@ -4215,8 +4223,8 @@ static void D3D11_ApplyEffect(
 	const MOJOSHADER_effectTechnique *technique = effectData->current_technique;
 	uint32_t whatever;
 
-	renderer->effectApplied = 1;
 	SDL_LockMutex(renderer->ctxLock);
+	renderer->effectApplied = 1;
 	if (effectData == renderer->currentEffect)
 	{
 		if (	technique == renderer->currentTechnique &&
@@ -4269,8 +4277,8 @@ static void D3D11_BeginPassRestore(
 		stateChanges
 	);
 	MOJOSHADER_effectBeginPass(effectData, 0);
-	SDL_UnlockMutex(renderer->ctxLock);
 	renderer->effectApplied = 1;
+	SDL_UnlockMutex(renderer->ctxLock);
 }
 
 static void D3D11_EndPassRestore(
@@ -4282,8 +4290,8 @@ static void D3D11_EndPassRestore(
 	SDL_LockMutex(renderer->ctxLock);
 	MOJOSHADER_effectEndPass(effectData);
 	MOJOSHADER_effectEnd(effectData);
-	SDL_UnlockMutex(renderer->ctxLock);
 	renderer->effectApplied = 1;
+	SDL_UnlockMutex(renderer->ctxLock);
 }
 
 /* Queries */

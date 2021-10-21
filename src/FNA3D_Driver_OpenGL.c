@@ -179,6 +179,7 @@ typedef struct OpenGLRenderer /* Cast from FNA3D_Renderer* */
 	uint8_t supports_anisotropic_filtering;
 	int32_t maxMultiSampleCount;
 	int32_t maxMultiSampleCountFormat[21];
+	int32_t windowSampleCount;
 
 	/* Blend State */
 	uint8_t alphaBlendEnable;
@@ -1551,6 +1552,7 @@ static void OPENGL_DrawIndexedPrimitives(
 	if (tps)
 	{
 		renderer->glEnable(GL_POINT_SPRITE);
+		renderer->glTexEnvi(GL_POINT_SPRITE, GL_COORD_REPLACE, GL_TRUE);
 	}
 
 	/* Draw! */
@@ -1580,6 +1582,7 @@ static void OPENGL_DrawIndexedPrimitives(
 
 	if (tps)
 	{
+		renderer->glTexEnvi(GL_POINT_SPRITE, GL_COORD_REPLACE, GL_FALSE);
 		renderer->glDisable(GL_POINT_SPRITE);
 	}
 }
@@ -1611,6 +1614,7 @@ static void OPENGL_DrawInstancedPrimitives(
 	if (tps)
 	{
 		renderer->glEnable(GL_POINT_SPRITE);
+		renderer->glTexEnvi(GL_POINT_SPRITE, GL_COORD_REPLACE, GL_TRUE);
 	}
 
 	/* Draw! */
@@ -1638,6 +1642,7 @@ static void OPENGL_DrawInstancedPrimitives(
 
 	if (tps)
 	{
+		renderer->glTexEnvi(GL_POINT_SPRITE, GL_COORD_REPLACE, GL_FALSE);
 		renderer->glDisable(GL_POINT_SPRITE);
 	}
 }
@@ -1656,6 +1661,7 @@ static void OPENGL_DrawPrimitives(
 	if (tps)
 	{
 		renderer->glEnable(GL_POINT_SPRITE);
+		renderer->glTexEnvi(GL_POINT_SPRITE, GL_COORD_REPLACE, GL_TRUE);
 	}
 
 	/* Draw! */
@@ -1667,6 +1673,7 @@ static void OPENGL_DrawPrimitives(
 
 	if (tps)
 	{
+		renderer->glTexEnvi(GL_POINT_SPRITE, GL_COORD_REPLACE, GL_FALSE);
 		renderer->glDisable(GL_POINT_SPRITE);
 	}
 }
@@ -5215,6 +5222,14 @@ static int32_t OPENGL_GetMaxMultiSampleCount(
 		/* This number isn't very good, but it's all we have... */
 		maxSamples = renderer->maxMultiSampleCount;
 	}
+	if (renderer->windowSampleCount > 0)
+	{
+		/* Desperate attempt to align multisample count with the window
+		 * sample count, otherwise glBlitFramebuffer will return
+		 * GL_INVALID_OPERATION
+		 */
+		maxSamples = SDL_min(maxSamples, renderer->windowSampleCount);
+	}
 	return SDL_min(maxSamples, multiSampleCount);
 }
 
@@ -5805,6 +5820,15 @@ FNA3D_Device* OPENGL_CreateDevice(
 		renderer->windowDepthFormat = FNA3D_DEPTHFORMAT_D24S8;
 	}
 
+	/* Lastly, check for backbuffer multisampling. This is extremely rare,
+	 * but Xwayland may try to introduce it (maybe because of DPI scaling?)
+	 */
+	SDL_GL_GetAttribute(SDL_GL_MULTISAMPLESAMPLES, &renderer->windowSampleCount);
+	if (renderer->windowSampleCount > 1)
+	{
+		FNA3D_LogWarn("Window surface is multisampled! This is an OS bug!");
+	}
+
 	/* Set the swap interval now that we know enough about the GL context */
 	OPENGL_INTERNAL_SetPresentationInterval(
 		presentationParameters->presentationInterval,
@@ -6020,20 +6044,22 @@ FNA3D_Device* OPENGL_CreateDevice(
 	else if (!renderer->useES3)
 	{
 		/* Compatibility contexts require that point sprites be enabled
-		 * explicitly. However, Apple's drivers have a blatant spec
-		 * violation that disallows a simple glEnable. So, here we are.
+		 * explicitly. However, drivers (and the Steam overlay) are
+		 * really fucking bad at not knowing that point sprite state
+		 * should only affect point rendering. So, here we are.
 		 * -flibit
 		 */
-		renderer->togglePointSprite = 0;
-		if (SDL_strcmp(SDL_GetPlatform(), "Mac OS X") == 0)
+		const char *os = SDL_GetPlatform();
+		if (	(SDL_strcmp(os, "Mac OS X") == 0) || /* Mainly Intel */
+			(SDL_strcmp(os, "Linux") == 0)	) /* Mainly Gallium */
 		{
 			renderer->togglePointSprite = 1;
 		}
 		else
 		{
 			renderer->glEnable(GL_POINT_SPRITE);
+			renderer->glTexEnvi(GL_POINT_SPRITE, GL_COORD_REPLACE, GL_TRUE);
 		}
-		renderer->glTexEnvi(GL_POINT_SPRITE, GL_COORD_REPLACE, 1);
 	}
 
 	/* Initialize renderer members not covered by SDL_memset('\0') */

@@ -3030,9 +3030,9 @@ static VulkanMemoryUsedRegion* VULKAN_INTERNAL_NewMemoryUsedRegion(
 	VkDeviceSize resourceSize,
 	VkDeviceSize alignment
 ) {
-	SDL_LockMutex(renderer->allocatorLock);
-
 	VulkanMemoryUsedRegion *memoryUsedRegion;
+
+	SDL_LockMutex(renderer->allocatorLock);
 
 	if (allocation->usedRegionCount == allocation->usedRegionCapacity)
 	{
@@ -3065,9 +3065,9 @@ static void VULKAN_INTERNAL_RemoveMemoryUsedRegion(
 	VulkanRenderer *renderer,
 	VulkanMemoryUsedRegion *usedRegion
 ) {
-	SDL_LockMutex(renderer->allocatorLock);
-
 	uint32_t i;
+
+	SDL_LockMutex(renderer->allocatorLock);
 
 	for (i = 0; i < usedRegion->allocation->usedRegionCount; i += 1)
 	{
@@ -6070,6 +6070,11 @@ static void VULKAN_INTERNAL_SubmitCommands(
 			),
 			&mode
 		);
+		if (mode.refresh_rate == 0)
+		{
+			/* Needs to be _something_ */
+			mode.refresh_rate = 60;
+		}
 
 		/* Begin next frame */
 		acquireResult = renderer->vkAcquireNextImageKHR(
@@ -9666,6 +9671,7 @@ static void VULKAN_VerifySampler(
 	VulkanRenderer *renderer = (VulkanRenderer*) driverData;
 	VulkanTexture *vulkanTexture = (VulkanTexture*) texture;
 	VkSampler vkSamplerState;
+	VulkanResourceAccessType resourceAccessType;
 
 	if (texture == NULL)
 	{
@@ -9692,9 +9698,18 @@ static void VULKAN_VerifySampler(
 
 	if (!vulkanTexture->external)
 	{
+		if (index >= MAX_TEXTURE_SAMPLERS)
+		{
+			resourceAccessType = RESOURCE_ACCESS_VERTEX_SHADER_READ_SAMPLED_IMAGE;
+		}
+		else
+		{
+			resourceAccessType = RESOURCE_ACCESS_FRAGMENT_SHADER_READ_SAMPLED_IMAGE;
+		}
+
 		VULKAN_INTERNAL_ImageMemoryBarrier(
 			renderer,
-			RESOURCE_ACCESS_FRAGMENT_SHADER_READ_SAMPLED_IMAGE,
+			resourceAccessType,
 			VK_IMAGE_ASPECT_COLOR_BIT,
 			0,
 			vulkanTexture->layerCount,
@@ -11874,11 +11889,6 @@ static FNA3D_Device* VULKAN_CreateDevice(
 	{
 		FNA3D_LogInfo("KHR_driver_properties unsupported! Bother your vendor about this!");
 	}
-	FNA3D_LogWarn(
-		"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
-		"FNA3D Vulkan is still in development! You have been warned!\n"
-		"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
-	);
 
 	if (!VULKAN_INTERNAL_CreateLogicalDevice(renderer))
 	{

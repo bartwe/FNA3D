@@ -2058,29 +2058,39 @@ static uint8_t VULKAN_INTERNAL_QuerySwapChainSupport(
 	SwapChainSupportDetails *outputDetails
 ) {
 	VkResult result;
-	uint32_t formatCount;
-	uint32_t presentModeCount;
 
+	/* Initialize these in case anything fails */
+	outputDetails->formatsLength = 0;
+	outputDetails->presentModesLength = 0;
+
+	/* Run the device surface queries */
 	result = renderer->vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
 		physicalDevice,
 		surface,
 		&outputDetails->capabilities
 	);
 	VULKAN_ERROR_CHECK(result, vkGetPhysicalDeviceSurfaceCapabilitiesKHR, 0)
-
-	renderer->vkGetPhysicalDeviceSurfaceFormatsKHR(
+	result = renderer->vkGetPhysicalDeviceSurfaceFormatsKHR(
 		physicalDevice,
 		surface,
-		&formatCount,
+		&outputDetails->formatsLength,
 		NULL
 	);
+	VULKAN_ERROR_CHECK(result, vkGetPhysicalDeviceSurfaceFormatsKHR, 0)
+	result = renderer->vkGetPhysicalDeviceSurfacePresentModesKHR(
+		physicalDevice,
+		surface,
+		&outputDetails->presentModesLength,
+		NULL
+	);
+	VULKAN_ERROR_CHECK(result, vkGetPhysicalDeviceSurfacePresentModesKHR, 0)
 
-	if (formatCount != 0)
+	/* Generate the arrays, if applicable */
+	if (outputDetails->formatsLength != 0)
 	{
 		outputDetails->formats = (VkSurfaceFormatKHR*) SDL_malloc(
-			sizeof(VkSurfaceFormatKHR) * formatCount
+			sizeof(VkSurfaceFormatKHR) * outputDetails->formatsLength
 		);
-		outputDetails->formatsLength = formatCount;
 
 		if (!outputDetails->formats)
 		{
@@ -2091,7 +2101,7 @@ static uint8_t VULKAN_INTERNAL_QuerySwapChainSupport(
 		result = renderer->vkGetPhysicalDeviceSurfaceFormatsKHR(
 			physicalDevice,
 			surface,
-			&formatCount,
+			&outputDetails->formatsLength,
 			outputDetails->formats
 		);
 		if (result != VK_SUCCESS)
@@ -2105,20 +2115,11 @@ static uint8_t VULKAN_INTERNAL_QuerySwapChainSupport(
 			return 0;
 		}
 	}
-
-	renderer->vkGetPhysicalDeviceSurfacePresentModesKHR(
-		physicalDevice,
-		surface,
-		&presentModeCount,
-		NULL
-	);
-
-	if (presentModeCount != 0)
+	if (outputDetails->presentModesLength != 0)
 	{
 		outputDetails->presentModes = (VkPresentModeKHR*) SDL_malloc(
-			sizeof(VkPresentModeKHR) * presentModeCount
+			sizeof(VkPresentModeKHR) * outputDetails->presentModesLength
 		);
-		outputDetails->presentModesLength = presentModeCount;
 
 		if (!outputDetails->presentModes)
 		{
@@ -2129,7 +2130,7 @@ static uint8_t VULKAN_INTERNAL_QuerySwapChainSupport(
 		result = renderer->vkGetPhysicalDeviceSurfacePresentModesKHR(
 			physicalDevice,
 			surface,
-			&presentModeCount,
+			&outputDetails->presentModesLength,
 			outputDetails->presentModes
 		);
 		if (result != VK_SUCCESS)
@@ -2145,6 +2146,9 @@ static uint8_t VULKAN_INTERNAL_QuerySwapChainSupport(
 		}
 	}
 
+	/* If we made it here, all the queries were successfull. This does NOT
+	 * necessarily mean there are any supported formats or present modes!
+	 */
 	return 1;
 }
 
@@ -2262,19 +2266,39 @@ static uint8_t VULKAN_INTERNAL_IsDeviceSuitable(
 	uint32_t *queueFamilyIndex,
 	uint8_t *deviceRank
 ) {
-	uint32_t queueFamilyCount, i;
+	uint32_t queueFamilyCount, queueFamilyRank, queueFamilyBest;
 	SwapChainSupportDetails swapChainSupportDetails;
 	VkQueueFamilyProperties *queueProps;
 	VkBool32 supportsPresent;
-	uint8_t querySuccess, foundSuitableDevice = 0;
+	uint8_t querySuccess;
 	VkPhysicalDeviceProperties deviceProperties;
+	uint32_t i;
 
-	*queueFamilyIndex = UINT32_MAX;
-	*deviceRank = 0;
-
-	/* Note: If no dedicated device exists,
-	 * one that supports our features would be fine
+	/* Get the device rank before doing any checks, in case one fails.
+	 * Note: If no dedicated device exists, one that supports our features
+	 * would be fine
 	 */
+	renderer->vkGetPhysicalDeviceProperties(
+		physicalDevice,
+		&deviceProperties
+	);
+	if (*deviceRank < DEVICE_PRIORITY[deviceProperties.deviceType])
+	{
+		/* This device outranks the best device we've found so far!
+		 * This includes a dedicated GPU that has less features than an
+		 * integrated GPU, because this is a freak case that is almost
+		 * never intentionally desired by the end user
+		 */
+		*deviceRank = DEVICE_PRIORITY[deviceProperties.deviceType];
+	}
+	else if (*deviceRank > DEVICE_PRIORITY[deviceProperties.deviceType])
+	{
+		/* Device is outranked by a previous device, don't even try to
+		 * run a query and reset the rank to avoid overwrites
+		 */
+		*deviceRank = 0;
+		return 0;
+	}
 
 	if (!VULKAN_INTERNAL_CheckDeviceExtensions(
 		renderer,
@@ -2300,6 +2324,8 @@ static uint8_t VULKAN_INTERNAL_IsDeviceSuitable(
 		queueProps
 	);
 
+	queueFamilyBest = 0;
+	*queueFamilyIndex = UINT32_MAX;
 	for (i = 0; i < queueFamilyCount; i += 1)
 	{
 		renderer->vkGetPhysicalDeviceSurfaceSupportKHR(
@@ -2308,22 +2334,66 @@ static uint8_t VULKAN_INTERNAL_IsDeviceSuitable(
 			surface,
 			&supportsPresent
 		);
-		if (	supportsPresent &&
-			(queueProps[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) != 0	&&
-			(queueProps[i].queueFlags & VK_QUEUE_COMPUTE_BIT) != 0 &&
-			(queueProps[i].queueFlags & VK_QUEUE_TRANSFER_BIT) != 0	)
+		if (	!supportsPresent ||
+			!(queueProps[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)	)
+		{
+			/* Not a graphics family, ignore. */
+			continue;
+		}
+
+		/* The queue family bitflags are kind of annoying.
+		 *
+		 * We of course need a graphics family, but we ideally want the
+		 * _primary_ graphics family. The spec states that at least one
+		 * graphics family must also be a compute family, so generally
+		 * drivers make that the first one. But hey, maybe something
+		 * genuinely can't do compute or something, and FNA doesn't
+		 * need it, so we'll be open to a non-compute queue family.
+		 *
+		 * Additionally, it's common to see the primary queue family
+		 * have the transfer bit set, which is great! But this is
+		 * actually optional; it's impossible to NOT have transfers in
+		 * graphics/compute but it _is_ possible for a graphics/compute
+		 * family, even the primary one, to just decide not to set the
+		 * bitflag. Admittedly, a driver may want to isolate transfer
+		 * queues to a dedicated family so that queues made solely for
+		 * transfers can have an optimized DMA queue.
+		 *
+		 * That, or the driver author got lazy and decided not to set
+		 * the bit. Looking at you, Android.
+		 *
+		 * -flibit
+		 */
+		if (queueProps[i].queueFlags & VK_QUEUE_COMPUTE_BIT)
+		{
+			if (queueProps[i].queueFlags & VK_QUEUE_TRANSFER_BIT)
+			{
+				/* Has all attribs! */
+				queueFamilyRank = 3;
+			}
+			else
+			{
+				/* Probably has a DMA transfer queue family */
+				queueFamilyRank = 2;
+			}
+		}
+		else
+		{
+			/* Just a graphics family, probably has something better */
+			queueFamilyRank = 1;
+		}
+		if (queueFamilyRank > queueFamilyBest)
 		{
 			*queueFamilyIndex = i;
-			foundSuitableDevice = 1;
-			break;
+			queueFamilyBest = queueFamilyRank;
 		}
 	}
 
 	SDL_stack_free(queueProps);
 
-	if (!foundSuitableDevice)
+	if (*queueFamilyIndex == UINT32_MAX)
 	{
-		/* This device probably can't even present, forget it */
+		/* Somehow no graphics queues existed. Compute-only device? */
 		return 0;
 	}
 
@@ -2334,22 +2404,18 @@ static uint8_t VULKAN_INTERNAL_IsDeviceSuitable(
 		surface,
 		&swapChainSupportDetails
 	);
-	SDL_free(swapChainSupportDetails.formats);
-	SDL_free(swapChainSupportDetails.presentModes);
-	if (	querySuccess == 0 ||
-		swapChainSupportDetails.formatsLength == 0 ||
-		swapChainSupportDetails.presentModesLength == 0	)
+	if (swapChainSupportDetails.formatsLength > 0)
 	{
-		return 0;
+		SDL_free(swapChainSupportDetails.formats);
+	}
+	if (swapChainSupportDetails.presentModesLength > 0)
+	{
+		SDL_free(swapChainSupportDetails.presentModes);
 	}
 
-	/* Try to make sure we pick the best device available */
-	renderer->vkGetPhysicalDeviceProperties(
-		physicalDevice,
-		&deviceProperties
-	);
-	*deviceRank = DEVICE_PRIORITY[deviceProperties.deviceType];
-	return 1;
+	return (	querySuccess &&
+			swapChainSupportDetails.formatsLength > 0 &&
+			swapChainSupportDetails.presentModesLength > 0	);
 }
 
 /* Vulkan: vkInstance/vkDevice Creation */
@@ -2528,39 +2594,37 @@ static uint8_t VULKAN_INTERNAL_DeterminePhysicalDevice(VulkanRenderer *renderer)
 
 	/* Any suitable device will do, but we'd like the best */
 	suitableIndex = -1;
-	deviceRank = 0;
 	highestRank = 0;
 	for (i = 0; i < physicalDeviceCount; i += 1)
 	{
-		const uint8_t suitable = VULKAN_INTERNAL_IsDeviceSuitable(
+		deviceRank = highestRank;
+		if (VULKAN_INTERNAL_IsDeviceSuitable(
 			renderer,
 			physicalDevices[i],
 			&physicalDeviceExtensions[i],
 			renderer->surface,
 			&queueFamilyIndex,
 			&deviceRank
-		);
-		if (deviceRank >= highestRank)
+		)) {
+			/* Use this for rendering.
+			 * Note that this may override a previous device that
+			 * supports rendering, but shares the same device rank.
+			 */
+			suitableIndex = i;
+			suitableQueueFamilyIndex = queueFamilyIndex;
+			highestRank = deviceRank;
+		}
+		else if (deviceRank > highestRank)
 		{
-			/* We found a better device type, but does it work? */
-			if (suitable)
-			{
-				/* Yes, use this for rendering. */
-				suitableIndex = i;
-				suitableQueueFamilyIndex = queueFamilyIndex;
-			}
-			else if (deviceRank > highestRank)
-			{
-				/* In this case, we found a... "realer?" GPU,
-				 * but it doesn't actually support our Vulkan.
-				 * We should disqualify all devices below as a
-				 * result, because if we don't we end up
-				 * ignoring real hardware and risk using
-				 * something like LLVMpipe instead!
-				 * -flibit
-				 */
-				suitableIndex = -1;
-			}
+			/* In this case, we found a... "realer?" GPU,
+			 * but it doesn't actually support our Vulkan.
+			 * We should disqualify all devices below as a
+			 * result, because if we don't we end up
+			 * ignoring real hardware and risk using
+			 * something like LLVMpipe instead!
+			 * -flibit
+			 */
+			suitableIndex = -1;
 			highestRank = deviceRank;
 		}
 	}
@@ -5446,7 +5510,11 @@ static ShaderResources *ShaderResources_Init(
 		shaderResources->inactiveDescriptorSets
 	);
 
-	MOJOSHADER_vkGetUniformBuffers(&vUniform, &vOff, &vSize, &fUniform, &fOff, &fSize);
+	MOJOSHADER_vkGetUniformBuffers(
+		renderer->mojoshaderContext,
+		&vUniform, &vOff, &vSize,
+		&fUniform, &fOff, &fSize
+	);
 
 	if (shaderStageFlag == VK_SHADER_STAGE_VERTEX_BIT)
 	{
@@ -5769,7 +5837,7 @@ static void VULKAN_INTERNAL_FetchDescriptorSetDataAndOffsets(
 
 	uint32_t i;
 
-	MOJOSHADER_vkGetBoundShaders(&vertShader, &fragShader);
+	MOJOSHADER_vkGetBoundShaders(renderer->mojoshaderContext, &vertShader, &fragShader);
 
 	if (renderer->vertexSamplerDescriptorSetDataNeedsUpdate)
 	{
@@ -5881,7 +5949,11 @@ static void VULKAN_INTERNAL_FetchDescriptorSetDataAndOffsets(
 	descriptorSets[2] = vertShaderResources->uniformDescriptorSet;
 	descriptorSets[3] = fragShaderResources->uniformDescriptorSet;
 
-	MOJOSHADER_vkGetUniformBuffers(&vUniform, &vOff, &vSize, &fUniform, &fOff, &fSize);
+	MOJOSHADER_vkGetUniformBuffers(
+		renderer->mojoshaderContext,
+		&vUniform, &vOff, &vSize,
+		&fUniform, &fOff, &fSize
+	);
 
 	dynamicOffsets[0] = vOff;
 	dynamicOffsets[1] = fOff;
@@ -6180,7 +6252,6 @@ static void VULKAN_INTERNAL_SubmitCommands(
 		{
 			renderer->buffersInUse[i]->bound = 0;
 			renderer->buffersInUse[i]->boundSubmitted = 1;
-			renderer->buffersInUse[i]->currentSubBufferIndex = 0;
 
 			renderer->submittedBuffers[i] = renderer->buffersInUse[i];
 			renderer->buffersInUse[i] = NULL;
@@ -6273,7 +6344,7 @@ static void VULKAN_INTERNAL_SubmitCommands(
 	VULKAN_ERROR_CHECK(result, vkQueueSubmit,)
 
 	/* Rotate the UBOs */
-	MOJOSHADER_vkEndFrame();
+	MOJOSHADER_vkEndFrame(renderer->mojoshaderContext);
 
 	/* Reset the texture staging buffer */
 	VULKAN_INTERNAL_ResetTextureStagingBuffer(renderer);
@@ -6802,6 +6873,7 @@ static void VULKAN_INTERNAL_MarkAsBound(
 	renderer->numBuffersInUse += 1;
 }
 
+/* This function is EXTREMELY sensitive. Change this at your own peril. -cosmonaut */
 static void VULKAN_INTERNAL_SetBufferData(
 	FNA3D_Renderer *driverData,
 	FNA3D_Buffer *buffer,
@@ -6814,45 +6886,27 @@ static void VULKAN_INTERNAL_SetBufferData(
 	VulkanBuffer *vulkanBuffer = (VulkanBuffer*) buffer;
 	uint32_t prevIndex;
 	uint8_t allocateResult;
-	uint32_t i;
 
 	#define CURIDX vulkanBuffer->currentSubBufferIndex
 	#define SUBBUF vulkanBuffer->subBuffers[CURIDX]
 
 	prevIndex = CURIDX;
 
-	if (options != FNA3D_SETDATAOPTIONS_NOOVERWRITE)
-	{
-		/* If buffer has not been bound this frame, set the first unbound index */
-		if (!vulkanBuffer->bound)
-		{
-			for (i = 0; i < vulkanBuffer->subBufferCount; i += 1)
-			{
-				if (vulkanBuffer->subBuffers[i]->bound == -1)
-				{
-					break;
-				}
-			}
-			CURIDX = i;
-		}
-	}
-
-	/*
-	 * If buffer was bound and options is NONE or DISCARD
-	 * find the next available unbound sub-buffer
+	/* If NONE or DISCARD is set, we check if the buffer was bound either this frame or the previous frame.
+	 * If so, we start at sub-buffer 0 and increment the index until we find a sub-buffer that is unbound.
+	 * Otherwise we use the current sub-buffer index.
 	 */
-	if (vulkanBuffer->bound)
+	if (	options != FNA3D_SETDATAOPTIONS_NOOVERWRITE &&
+		(vulkanBuffer->bound || vulkanBuffer->boundSubmitted)	)
 	{
-		if (options == FNA3D_SETDATAOPTIONS_NONE || options == FNA3D_SETDATAOPTIONS_DISCARD)
+		CURIDX = 0;
+		while (CURIDX < vulkanBuffer->subBufferCount && SUBBUF->bound != -1)
 		{
-			while (CURIDX < vulkanBuffer->subBufferCount && SUBBUF->bound != -1)
-			{
-				CURIDX += 1;
-			}
+			CURIDX += 1;
 		}
 	}
 
-	/* Create a new SubBuffer if needed */
+	/* We are out of valid sub-buffers, so we have to create a new one */
 	if (CURIDX == vulkanBuffer->subBufferCount)
 	{
 		allocateResult = VULKAN_INTERNAL_AllocateSubBuffer(renderer, vulkanBuffer);
@@ -6869,6 +6923,7 @@ static void VULKAN_INTERNAL_SetBufferData(
 		}
 	}
 
+	/* If this is a defrag frame, wait for that to finish */
 	if (renderer->bufferDefragInProgress)
 	{
 		renderer->vkWaitForFences(
@@ -7343,7 +7398,7 @@ static void VULKAN_INTERNAL_GenerateVertexInputInfo(
 	VkVertexInputBindingDescription vertexInputBindingDescription;
 	VkVertexInputBindingDivisorDescriptionEXT divisorDescription;
 
-	MOJOSHADER_vkGetBoundShaders(&vertexShader, &blah);
+	MOJOSHADER_vkGetBoundShaders(renderer->mojoshaderContext, &vertexShader, &blah);
 
 	SDL_memset(attrUse, '\0', sizeof(attrUse));
 	for (i = 0; i < (int32_t) renderer->numVertexBindings; i += 1)
@@ -7483,7 +7538,7 @@ static VkPipeline VULKAN_INTERNAL_FetchPipeline(VulkanRenderer *renderer)
 	hash.vertexBufferBindingsIndex = renderer->currentVertexBufferBindingsIndex;
 	hash.primitiveType = renderer->currentPrimitiveType;
 	hash.sampleMask = renderer->multiSampleMask[0];
-	MOJOSHADER_vkGetBoundShaders(&vertShader, &fragShader);
+	MOJOSHADER_vkGetBoundShaders(renderer->mojoshaderContext, &vertShader, &fragShader);
 	hash.vertShader = vertShader;
 	hash.fragShader = fragShader;
 	hash.renderPass = renderer->renderPass;
@@ -7757,6 +7812,7 @@ static VkPipeline VULKAN_INTERNAL_FetchPipeline(VulkanRenderer *renderer)
 	stageInfos[1].pSpecializationInfo = NULL;
 
 	MOJOSHADER_vkGetShaderModules(
+		renderer->mojoshaderContext,
 		&stageInfos[0].module,
 		&stageInfos[1].module
 	);
@@ -7804,7 +7860,7 @@ static VkPipeline VULKAN_INTERNAL_FetchPipeline(VulkanRenderer *renderer)
 static void VULKAN_INTERNAL_BindPipeline(VulkanRenderer *renderer)
 {
 	VkShaderModule vertShader, fragShader;
-	MOJOSHADER_vkGetShaderModules(&vertShader, &fragShader);
+	MOJOSHADER_vkGetShaderModules(renderer->mojoshaderContext, &vertShader, &fragShader);
 
 	if (	renderer->needNewPipeline ||
 		renderer->currentVertShader != vertShader ||
@@ -9300,7 +9356,7 @@ static void VULKAN_DrawInstancedPrimitives(
 		XNAToVK_IndexType[indexElementSize]
 	));
 
-	MOJOSHADER_vkGetBoundShaders(&vertShader, &fragShader);
+	MOJOSHADER_vkGetBoundShaders(renderer->mojoshaderContext, &vertShader, &fragShader);
 	vertShaderResources = VULKAN_INTERNAL_FetchShaderResources(
 		renderer,
 		vertShader,
@@ -9400,7 +9456,7 @@ static void VULKAN_DrawPrimitives(
 		));
 	}
 
-	MOJOSHADER_vkGetBoundShaders(&vertShader, &fragShader);
+	MOJOSHADER_vkGetBoundShaders(renderer->mojoshaderContext, &vertShader, &fragShader);
 	vertShaderResources = VULKAN_INTERNAL_FetchShaderResources(
 		renderer,
 		vertShader,
@@ -9790,7 +9846,7 @@ static void VULKAN_ApplyVertexBufferBindings(
 	VkDeviceSize offset;
 
 	/* Check VertexBufferBindings */
-	MOJOSHADER_vkGetBoundShaders(&vertexShader, &blah);
+	MOJOSHADER_vkGetBoundShaders(renderer->mojoshaderContext, &vertexShader, &blah);
 	bindingsResult = PackedVertexBufferBindingsArray_Fetch(
 		renderer->vertexBufferBindingsCache,
 		bindings,
@@ -9973,7 +10029,7 @@ static void VULKAN_ResolveTarget(
 	VulkanTexture *vulkanTexture = (VulkanTexture*) target->texture;
 	int32_t layerCount = (target->type == FNA3D_RENDERTARGET_TYPE_CUBE) ? 6 : 1;
 	int32_t level;
-	VulkanResourceAccessType origAccessType;
+	VulkanResourceAccessType *origAccessType;
 	VkImageBlit blit;
 
 	/* The target is resolved during the render pass. */
@@ -9983,42 +10039,25 @@ static void VULKAN_ResolveTarget(
 	{
 		VULKAN_INTERNAL_MaybeEndRenderPass(renderer, 1);
 
-		origAccessType = vulkanTexture->resourceAccessType;
-
-		VULKAN_INTERNAL_ImageMemoryBarrier(
-			renderer,
-			RESOURCE_ACCESS_TRANSFER_READ,
-			VK_IMAGE_ASPECT_COLOR_BIT,
-			0,
-			layerCount,
-			0,
-			1,
-			0,
-			vulkanTexture->image,
-			&vulkanTexture->resourceAccessType
+		/* Store the original image layout... */
+		origAccessType = SDL_stack_alloc(
+			VulkanResourceAccessType,
+			target->levelCount
 		);
+		for (level = 0; level < target->levelCount; level += 1)
+		{
+			origAccessType[level] = vulkanTexture->resourceAccessType;
+		}
 
-		VULKAN_INTERNAL_ImageMemoryBarrier(
-			renderer,
-			RESOURCE_ACCESS_TRANSFER_WRITE,
-			VK_IMAGE_ASPECT_COLOR_BIT,
-			0,
-			layerCount,
-			1,
-			target->levelCount - 1,
-			1,
-			vulkanTexture->image,
-			&vulkanTexture->resourceAccessType
-		);
-
+		/* Blit each mip sequentially. Barriers, barriers everywhere! */
 		for (level = 1; level < target->levelCount; level += 1)
 		{
 			blit.srcOffsets[0].x = 0;
 			blit.srcOffsets[0].y = 0;
 			blit.srcOffsets[0].z = 0;
 
-			blit.srcOffsets[1].x = vulkanTexture->dimensions.width;
-			blit.srcOffsets[1].y = vulkanTexture->dimensions.height;
+			blit.srcOffsets[1].x = vulkanTexture->dimensions.width >> (level - 1);
+			blit.srcOffsets[1].y = vulkanTexture->dimensions.height >> (level - 1);
 			blit.srcOffsets[1].z = 1;
 
 			blit.dstOffsets[0].x = 0;
@@ -10032,12 +10071,38 @@ static void VULKAN_ResolveTarget(
 			blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 			blit.srcSubresource.baseArrayLayer = 0;
 			blit.srcSubresource.layerCount = layerCount;
-			blit.srcSubresource.mipLevel = 0;
+			blit.srcSubresource.mipLevel = level - 1;
 
 			blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 			blit.dstSubresource.baseArrayLayer = 0;
 			blit.dstSubresource.layerCount = layerCount;
 			blit.dstSubresource.mipLevel = level;
+
+			VULKAN_INTERNAL_ImageMemoryBarrier(
+				renderer,
+				RESOURCE_ACCESS_TRANSFER_READ,
+				VK_IMAGE_ASPECT_COLOR_BIT,
+				0,
+				layerCount,
+				level - 1,
+				1,
+				0,
+				vulkanTexture->image,
+				&origAccessType[level - 1]
+			);
+
+			VULKAN_INTERNAL_ImageMemoryBarrier(
+				renderer,
+				RESOURCE_ACCESS_TRANSFER_WRITE,
+				VK_IMAGE_ASPECT_COLOR_BIT,
+				0,
+				layerCount,
+				level,
+				1,
+				1,
+				vulkanTexture->image,
+				&origAccessType[level]
+			);
 
 			RECORD_CMD(renderer->vkCmdBlitImage(
 				renderer->currentCommandBuffer,
@@ -10051,34 +10116,26 @@ static void VULKAN_ResolveTarget(
 			));
 		}
 
-		/* Transition level >= 1 back to the original access type */
-		VULKAN_INTERNAL_ImageMemoryBarrier(
-			renderer,
-			origAccessType,
-			VK_IMAGE_ASPECT_COLOR_BIT,
-			0,
-			layerCount,
-			1,
-			target->levelCount - 1,
-			0,
-			vulkanTexture->image,
-			&vulkanTexture->resourceAccessType
-		);
+		/* Revert to the old image layout.
+		 * Not as graceful as a single barrier call, but oh well
+		 */
+		for (level = 0; level < target->levelCount; level += 1)
+		{
+			VULKAN_INTERNAL_ImageMemoryBarrier(
+				renderer,
+				vulkanTexture->resourceAccessType,
+				VK_IMAGE_ASPECT_COLOR_BIT,
+				0,
+				layerCount,
+				level,
+				1,
+				0,
+				vulkanTexture->image,
+				&origAccessType[level]
+			);
+		}
 
-		/* The 0th mip requires a little access type switcheroo... */
-		vulkanTexture->resourceAccessType = RESOURCE_ACCESS_TRANSFER_READ;
-		VULKAN_INTERNAL_ImageMemoryBarrier(
-			renderer,
-			origAccessType,
-			VK_IMAGE_ASPECT_COLOR_BIT,
-			0,
-			layerCount,
-			0,
-			1,
-			0,
-			vulkanTexture->image,
-			&vulkanTexture->resourceAccessType
-		);
+		SDL_stack_free(origAccessType);
 	}
 }
 
@@ -11140,7 +11197,7 @@ static inline void ShaderResourcesHashTable_Remove(
 	}
 }
 
-static void VULKAN_INTERNAL_DeleteShader(void* shader)
+static void VULKAN_INTERNAL_DeleteShader(const void *shaderContext, void* shader)
 {
 	MOJOSHADER_vkShader *vkShader = (MOJOSHADER_vkShader*) shader;
 	const MOJOSHADER_parseData *pd;
@@ -11179,7 +11236,7 @@ static void VULKAN_INTERNAL_DeleteShader(void* shader)
 		}
 	}
 
-	MOJOSHADER_vkDeleteShader(vkShader);
+	MOJOSHADER_vkDeleteShader(renderer->mojoshaderContext, vkShader);
 }
 
 static void VULKAN_CreateEffect(
@@ -11189,18 +11246,21 @@ static void VULKAN_CreateEffect(
 	FNA3D_Effect **effect,
 	MOJOSHADER_effect **effectData
 ) {
+	VulkanRenderer *renderer = (VulkanRenderer*) driverData;
 	MOJOSHADER_effectShaderContext shaderBackend;
 	VulkanEffect *result;
 	int32_t i;
 
+	shaderBackend.shaderContext = renderer->mojoshaderContext;
 	shaderBackend.compileShader = (MOJOSHADER_compileShaderFunc) MOJOSHADER_vkCompileShader;
 	shaderBackend.shaderAddRef = (MOJOSHADER_shaderAddRefFunc) MOJOSHADER_vkShaderAddRef;
 	shaderBackend.deleteShader = VULKAN_INTERNAL_DeleteShader;
 	shaderBackend.getParseData = (MOJOSHADER_getParseDataFunc) MOJOSHADER_vkGetShaderParseData;
 	shaderBackend.bindShaders = (MOJOSHADER_bindShadersFunc) MOJOSHADER_vkBindShaders;
 	shaderBackend.getBoundShaders = (MOJOSHADER_getBoundShadersFunc) MOJOSHADER_vkGetBoundShaders;
-	shaderBackend.mapUniformBufferMemory = MOJOSHADER_vkMapUniformBufferMemory;
-	shaderBackend.unmapUniformBufferMemory = MOJOSHADER_vkUnmapUniformBufferMemory;
+	shaderBackend.mapUniformBufferMemory = (MOJOSHADER_mapUniformBufferMemoryFunc) MOJOSHADER_vkMapUniformBufferMemory;
+	shaderBackend.unmapUniformBufferMemory = (MOJOSHADER_unmapUniformBufferMemoryFunc) MOJOSHADER_vkUnmapUniformBufferMemory;
+	shaderBackend.getError = (MOJOSHADER_getErrorFunc) MOJOSHADER_vkGetError;
 	shaderBackend.m = NULL;
 	shaderBackend.f = NULL;
 	shaderBackend.malloc_data = driverData;
@@ -11234,13 +11294,14 @@ static void VULKAN_CloneEffect(
 	FNA3D_Effect **effect,
 	MOJOSHADER_effect **effectData
 ) {
+	VulkanRenderer *renderer = (VulkanRenderer*) driverData;
 	VulkanEffect *vulkanCloneSource = (VulkanEffect*) cloneSource;
 	VulkanEffect *result;
 
 	*effectData = MOJOSHADER_cloneEffect(vulkanCloneSource->effect);
 	if (*effectData == NULL)
 	{
-		FNA3D_LogError(MOJOSHADER_vkGetError());
+		FNA3D_LogError(MOJOSHADER_vkGetError(renderer->mojoshaderContext));
 	}
 
 	result = (VulkanEffect*) SDL_malloc(sizeof(VulkanEffect));
@@ -12096,11 +12157,7 @@ static FNA3D_Device* VULKAN_CreateDevice(
 		NULL,
 		renderer
 	);
-	if (renderer->mojoshaderContext != NULL)
-	{
-		MOJOSHADER_vkMakeContextCurrent(renderer->mojoshaderContext);
-	}
-	else
+	if (renderer->mojoshaderContext == NULL)
 	{
 		FNA3D_LogError("Failed to create MojoShader context");
 		return NULL;

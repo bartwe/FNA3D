@@ -4368,6 +4368,7 @@ static void D3D11_AddDisposeEffect(
 	FNA3D_Renderer *driverData,
 	FNA3D_Effect *effect
 ) {
+	int32_t i;
 	D3D11Renderer *renderer = (D3D11Renderer*) driverData;
 	MOJOSHADER_effect *effectData = ((D3D11Effect*) effect)->effect;
 
@@ -4381,6 +4382,16 @@ static void D3D11_AddDisposeEffect(
 		renderer->currentPass = 0;
 		renderer->effectApplied = 1;
 	}
+
+	/* invalidate all inputLayouts */
+	for (i = 0; i < renderer->inputLayoutCache.count; i += 1)
+	{
+		ID3D11InputLayout_Release(
+			(ID3D11InputLayout*)renderer->inputLayoutCache.elements[i].value
+		);
+	}
+	renderer->inputLayoutCache.count = 0;
+
 	MOJOSHADER_deleteEffect(effectData);
 	SDL_UnlockMutex(renderer->ctxLock);
 	SDL_free(effect);
@@ -4604,7 +4615,6 @@ static uint8_t D3D11_SupportsSRGBRenderTargets(FNA3D_Renderer *driverData)
 	D3D11Renderer *renderer = (D3D11Renderer*) driverData;
 	return renderer->supportsSRGBRenderTarget;
 }
-
 static void D3D11_GetMaxTextureSlots(
 	FNA3D_Renderer *driverData,
 	int32_t *textures,

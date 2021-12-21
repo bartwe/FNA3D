@@ -1231,8 +1231,7 @@ typedef struct VulkanRenderer
 	int8_t freeQueryIndexStack[MAX_QUERIES];
 	int8_t freeQueryIndexStackHead;
 
-	int backBufferIsSRGB;
-
+	int8_t backBufferIsSRGB;
 	VkFormat swapchainFormat;
 	VkComponentMapping swapchainSwizzle;
 	VulkanColorBuffer fauxBackbufferColor;
@@ -1434,6 +1433,7 @@ typedef struct VulkanRenderer
 	uint8_t supportsDxt1;
 	uint8_t supportsS3tc;
 	uint8_t supportsDebugUtils;
+	uint8_t supportsSRGBRenderTarget;
 	uint8_t debugMode;
 	VulkanExtensions supports;
 
@@ -1594,6 +1594,7 @@ static VkComponentMapping XNAToVK_SurfaceSwizzle[] =
 		VK_COMPONENT_SWIZZLE_A
 	},
 	IDENTITY_SWIZZLE,	/* SurfaceFormat.ColorSrgbEXT */
+	IDENTITY_SWIZZLE,	/* SurfaceFormat.Dxt5SrgbEXT */
 };
 
 static VkFormat XNAToVK_SurfaceFormat[] =
@@ -1618,8 +1619,9 @@ static VkFormat XNAToVK_SurfaceFormat[] =
 	VK_FORMAT_R16G16_SFLOAT,		/* SurfaceFormat.HalfVector2 */
 	VK_FORMAT_R16G16B16A16_SFLOAT,		/* SurfaceFormat.HalfVector4 */
 	VK_FORMAT_R16G16B16A16_SFLOAT,		/* SurfaceFormat.HdrBlendable */
-	VK_FORMAT_R8G8B8A8_UNORM,		/* SurfaceFormat.ColorBgraEXT */
-	VK_FORMAT_R8G8B8A8_SRGB			/* SurfaceFormat.ColorSrgbEXT */
+	VK_FORMAT_B8G8R8A8_UNORM,		/* SurfaceFormat.ColorBgraEXT */
+	VK_FORMAT_R8G8B8A8_SRGB,		/* SurfaceFormat.ColorSrgbEXT */
+	VK_FORMAT_BC3_SRGB_BLOCK,		/* SurfaceFormat.Dxt5 */
 };
 
 static inline VkFormat XNAToVK_DepthFormat(
@@ -2058,39 +2060,29 @@ static uint8_t VULKAN_INTERNAL_QuerySwapChainSupport(
 	SwapChainSupportDetails *outputDetails
 ) {
 	VkResult result;
+	uint32_t formatCount;
+	uint32_t presentModeCount;
 
-	/* Initialize these in case anything fails */
-	outputDetails->formatsLength = 0;
-	outputDetails->presentModesLength = 0;
-
-	/* Run the device surface queries */
 	result = renderer->vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
 		physicalDevice,
 		surface,
 		&outputDetails->capabilities
 	);
 	VULKAN_ERROR_CHECK(result, vkGetPhysicalDeviceSurfaceCapabilitiesKHR, 0)
-	result = renderer->vkGetPhysicalDeviceSurfaceFormatsKHR(
-		physicalDevice,
-		surface,
-		&outputDetails->formatsLength,
-		NULL
-	);
-	VULKAN_ERROR_CHECK(result, vkGetPhysicalDeviceSurfaceFormatsKHR, 0)
-	result = renderer->vkGetPhysicalDeviceSurfacePresentModesKHR(
-		physicalDevice,
-		surface,
-		&outputDetails->presentModesLength,
-		NULL
-	);
-	VULKAN_ERROR_CHECK(result, vkGetPhysicalDeviceSurfacePresentModesKHR, 0)
 
-	/* Generate the arrays, if applicable */
-	if (outputDetails->formatsLength != 0)
+	renderer->vkGetPhysicalDeviceSurfaceFormatsKHR(
+		physicalDevice,
+		surface,
+		&formatCount,
+		NULL
+	);
+
+	if (formatCount != 0)
 	{
 		outputDetails->formats = (VkSurfaceFormatKHR*) SDL_malloc(
-			sizeof(VkSurfaceFormatKHR) * outputDetails->formatsLength
+			sizeof(VkSurfaceFormatKHR) * formatCount
 		);
+		outputDetails->formatsLength = formatCount;
 
 		if (!outputDetails->formats)
 		{
@@ -2101,7 +2093,7 @@ static uint8_t VULKAN_INTERNAL_QuerySwapChainSupport(
 		result = renderer->vkGetPhysicalDeviceSurfaceFormatsKHR(
 			physicalDevice,
 			surface,
-			&outputDetails->formatsLength,
+			&formatCount,
 			outputDetails->formats
 		);
 		if (result != VK_SUCCESS)
@@ -2115,11 +2107,20 @@ static uint8_t VULKAN_INTERNAL_QuerySwapChainSupport(
 			return 0;
 		}
 	}
-	if (outputDetails->presentModesLength != 0)
+
+	renderer->vkGetPhysicalDeviceSurfacePresentModesKHR(
+		physicalDevice,
+		surface,
+		&presentModeCount,
+		NULL
+	);
+
+	if (presentModeCount != 0)
 	{
 		outputDetails->presentModes = (VkPresentModeKHR*) SDL_malloc(
-			sizeof(VkPresentModeKHR) * outputDetails->presentModesLength
+			sizeof(VkPresentModeKHR) * presentModeCount
 		);
+		outputDetails->presentModesLength = presentModeCount;
 
 		if (!outputDetails->presentModes)
 		{
@@ -2130,7 +2131,7 @@ static uint8_t VULKAN_INTERNAL_QuerySwapChainSupport(
 		result = renderer->vkGetPhysicalDeviceSurfacePresentModesKHR(
 			physicalDevice,
 			surface,
-			&outputDetails->presentModesLength,
+			&presentModeCount,
 			outputDetails->presentModes
 		);
 		if (result != VK_SUCCESS)
@@ -2146,9 +2147,6 @@ static uint8_t VULKAN_INTERNAL_QuerySwapChainSupport(
 		}
 	}
 
-	/* If we made it here, all the queries were successfull. This does NOT
-	 * necessarily mean there are any supported formats or present modes!
-	 */
 	return 1;
 }
 
@@ -2274,31 +2272,12 @@ static uint8_t VULKAN_INTERNAL_IsDeviceSuitable(
 	VkPhysicalDeviceProperties deviceProperties;
 	uint32_t i;
 
-	/* Get the device rank before doing any checks, in case one fails.
-	 * Note: If no dedicated device exists, one that supports our features
-	 * would be fine
+	*queueFamilyIndex = UINT32_MAX;
+	*deviceRank = 0;
+
+	/* Note: If no dedicated device exists,
+	 * one that supports our features would be fine
 	 */
-	renderer->vkGetPhysicalDeviceProperties(
-		physicalDevice,
-		&deviceProperties
-	);
-	if (*deviceRank < DEVICE_PRIORITY[deviceProperties.deviceType])
-	{
-		/* This device outranks the best device we've found so far!
-		 * This includes a dedicated GPU that has less features than an
-		 * integrated GPU, because this is a freak case that is almost
-		 * never intentionally desired by the end user
-		 */
-		*deviceRank = DEVICE_PRIORITY[deviceProperties.deviceType];
-	}
-	else if (*deviceRank > DEVICE_PRIORITY[deviceProperties.deviceType])
-	{
-		/* Device is outranked by a previous device, don't even try to
-		 * run a query and reset the rank to avoid overwrites
-		 */
-		*deviceRank = 0;
-		return 0;
-	}
 
 	if (!VULKAN_INTERNAL_CheckDeviceExtensions(
 		renderer,
@@ -2325,7 +2304,6 @@ static uint8_t VULKAN_INTERNAL_IsDeviceSuitable(
 	);
 
 	queueFamilyBest = 0;
-	*queueFamilyIndex = UINT32_MAX;
 	for (i = 0; i < queueFamilyCount; i += 1)
 	{
 		renderer->vkGetPhysicalDeviceSurfaceSupportKHR(
@@ -2404,18 +2382,22 @@ static uint8_t VULKAN_INTERNAL_IsDeviceSuitable(
 		surface,
 		&swapChainSupportDetails
 	);
-	if (swapChainSupportDetails.formatsLength > 0)
+	SDL_free(swapChainSupportDetails.formats);
+	SDL_free(swapChainSupportDetails.presentModes);
+	if (	querySuccess == 0 ||
+		swapChainSupportDetails.formatsLength == 0 ||
+		swapChainSupportDetails.presentModesLength == 0	)
 	{
-		SDL_free(swapChainSupportDetails.formats);
-	}
-	if (swapChainSupportDetails.presentModesLength > 0)
-	{
-		SDL_free(swapChainSupportDetails.presentModes);
+		return 0;
 	}
 
-	return (	querySuccess &&
-			swapChainSupportDetails.formatsLength > 0 &&
-			swapChainSupportDetails.presentModesLength > 0	);
+	/* Try to make sure we pick the best device available */
+	renderer->vkGetPhysicalDeviceProperties(
+		physicalDevice,
+		&deviceProperties
+	);
+	*deviceRank = DEVICE_PRIORITY[deviceProperties.deviceType];
+	return 1;
 }
 
 /* Vulkan: vkInstance/vkDevice Creation */
@@ -2594,37 +2576,39 @@ static uint8_t VULKAN_INTERNAL_DeterminePhysicalDevice(VulkanRenderer *renderer)
 
 	/* Any suitable device will do, but we'd like the best */
 	suitableIndex = -1;
+	deviceRank = 0;
 	highestRank = 0;
 	for (i = 0; i < physicalDeviceCount; i += 1)
 	{
-		deviceRank = highestRank;
-		if (VULKAN_INTERNAL_IsDeviceSuitable(
+		const uint8_t suitable = VULKAN_INTERNAL_IsDeviceSuitable(
 			renderer,
 			physicalDevices[i],
 			&physicalDeviceExtensions[i],
 			renderer->surface,
 			&queueFamilyIndex,
 			&deviceRank
-		)) {
-			/* Use this for rendering.
-			 * Note that this may override a previous device that
-			 * supports rendering, but shares the same device rank.
-			 */
-			suitableIndex = i;
-			suitableQueueFamilyIndex = queueFamilyIndex;
-			highestRank = deviceRank;
-		}
-		else if (deviceRank > highestRank)
+		);
+		if (deviceRank >= highestRank)
 		{
-			/* In this case, we found a... "realer?" GPU,
-			 * but it doesn't actually support our Vulkan.
-			 * We should disqualify all devices below as a
-			 * result, because if we don't we end up
-			 * ignoring real hardware and risk using
-			 * something like LLVMpipe instead!
-			 * -flibit
-			 */
-			suitableIndex = -1;
+			/* We found a better device type, but does it work? */
+			if (suitable)
+			{
+				/* Yes, use this for rendering. */
+				suitableIndex = i;
+				suitableQueueFamilyIndex = queueFamilyIndex;
+			}
+			else if (deviceRank > highestRank)
+			{
+				/* In this case, we found a... "realer?" GPU,
+				 * but it doesn't actually support our Vulkan.
+				 * We should disqualify all devices below as a
+				 * result, because if we don't we end up
+				 * ignoring real hardware and risk using
+				 * something like LLVMpipe instead!
+				 * -flibit
+				 */
+				suitableIndex = -1;
+			}
 			highestRank = deviceRank;
 		}
 	}
@@ -6548,8 +6532,8 @@ static CreateSwapchainResult VULKAN_INTERNAL_CreateSwapchain(
 	}
 
 	renderer->swapchainFormat = renderer->backBufferIsSRGB
-		? VK_FORMAT_B8G8R8A8_SRGB
-		: VK_FORMAT_B8G8R8A8_UNORM;
+		? VK_FORMAT_R8G8B8A8_SRGB
+		: VK_FORMAT_R8G8B8A8_UNORM;
 	renderer->swapchainSwizzle.r = VK_COMPONENT_SWIZZLE_IDENTITY;
 	renderer->swapchainSwizzle.g = VK_COMPONENT_SWIZZLE_IDENTITY;
 	renderer->swapchainSwizzle.b = VK_COMPONENT_SWIZZLE_IDENTITY;
@@ -6561,7 +6545,9 @@ static CreateSwapchainResult VULKAN_INTERNAL_CreateSwapchain(
 		&surfaceFormat
 	)) {
 		FNA3D_LogWarn("RGBA8 swapchain unsupported, falling back to BGRA8 with swizzle");
-		renderer->swapchainFormat = VK_FORMAT_B8G8R8A8_UNORM;
+		renderer->swapchainFormat = renderer->backBufferIsSRGB
+			? VK_FORMAT_B8G8R8A8_SRGB
+			: VK_FORMAT_B8G8R8A8_UNORM;
 		renderer->swapchainSwizzle.r = VK_COMPONENT_SWIZZLE_B;
 		renderer->swapchainSwizzle.g = VK_COMPONENT_SWIZZLE_G;
 		renderer->swapchainSwizzle.b = VK_COMPONENT_SWIZZLE_R;
@@ -10455,14 +10441,10 @@ static void VULKAN_INTERNAL_SetTextureData(
 		&texture->resourceAccessType
 	);
 
-	/* DXT texture buffers must be at least 4x4 */
-	if (	texture->colorFormat == FNA3D_SURFACEFORMAT_DXT1 ||
-		texture->colorFormat == FNA3D_SURFACEFORMAT_DXT3 ||
-		texture->colorFormat == FNA3D_SURFACEFORMAT_DXT5	)
-	{
-		bufferRowLength = SDL_max(4, w);
-		bufferImageHeight = SDL_max(4, h);
-	}
+	/* Block compressed texture buffers must be at least 1 block in width and height */
+	int32_t blockSize = Texture_GetBlockSize(texture->colorFormat);
+	bufferRowLength = SDL_max(blockSize, w);
+	bufferImageHeight = SDL_max(blockSize, h);
 
 	imageCopy.imageExtent.width = w;
 	imageCopy.imageExtent.height = h;
@@ -11580,6 +11562,12 @@ static uint8_t VULKAN_SupportsNoOverwrite(FNA3D_Renderer *driverData)
 	return 1;
 }
 
+static uint8_t VULKAN_SupportsSRGBRenderTargets(FNA3D_Renderer *driverData)
+{
+	VulkanRenderer *renderer = (VulkanRenderer*) driverData;
+	return renderer->supportsSRGBRenderTarget;
+}
+
 static void VULKAN_GetMaxTextureSlots(
 	FNA3D_Renderer *driverData,
 	int32_t *textures,
@@ -11851,6 +11839,9 @@ static FNA3D_Device* VULKAN_CreateDevice(
 
 	/* Variables: Check for DXT1/S3TC Support */
 	VkFormatProperties formatPropsBC1, formatPropsBC2, formatPropsBC3;
+
+	/* Variables: Check for SRGB Render Target Support */
+	VkFormatProperties formatPropsSrgbRT;
 
 	/* Variables: Create query pool */
 	VkQueryPoolCreateInfo queryPoolCreateInfo;
@@ -12440,6 +12431,11 @@ static FNA3D_Device* VULKAN_CreateDevice(
 		XNAToVK_SurfaceFormat[FNA3D_SURFACEFORMAT_DXT5],
 		&formatPropsBC3
 	);
+	renderer->vkGetPhysicalDeviceFormatProperties(
+		renderer->physicalDevice,
+		XNAToVK_SurfaceFormat[FNA3D_SURFACEFORMAT_COLORSRGB_EXT],
+		&formatPropsSrgbRT
+	);
 
 	#define SUPPORTED_FORMAT(fmt) \
 		((fmt.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) && \
@@ -12448,6 +12444,10 @@ static FNA3D_Device* VULKAN_CreateDevice(
 	renderer->supportsS3tc = (
 		SUPPORTED_FORMAT(formatPropsBC2) ||
 		SUPPORTED_FORMAT(formatPropsBC3)
+	);
+
+	renderer->supportsSRGBRenderTarget = (
+		SUPPORTED_FORMAT(formatPropsSrgbRT) && (formatPropsSrgbRT.optimalTilingFeatures & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT)
 	);
 
 	/*

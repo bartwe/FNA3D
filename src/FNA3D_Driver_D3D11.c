@@ -5390,17 +5390,54 @@ static void D3D11_PLATFORM_GetDefaultAdapter(
 	}
 }
 
+static void ResolveSwapChainModeDescription(
+	IUnknown* device,
+	IDXGIAdapter* adapter,
+	IDXGIFactory1 *factory,
+	HWND window,
+	DXGI_MODE_DESC* modeDescription,
+	DXGI_SWAP_CHAIN_DESC* swapChainDescription
+) {
+	HMONITOR monitor;
+	int iAdapter, iOutput;
+	IDXGIAdapter1* pAdapter;
+	IDXGIOutput *output;
+	DXGI_OUTPUT_DESC description;
+	
+	/* Find the output (on any adapter) attached to the monitor that holds our window */
+	monitor = MonitorFromWindow(window, MONITOR_DEFAULTTOPRIMARY);
+	while (SUCCEEDED(IDXGIFactory1_EnumAdapters1(factory, iAdapter++, &pAdapter)))
+	{
+		iOutput = 0;
+		while (SUCCEEDED(IDXGIAdapter_EnumOutputs(pAdapter, iOutput++, &output)))
+		{
+			IDXGIOutput_GetDesc(output, &description);
+			if (description.Monitor == monitor)
+			{
+				if (SUCCEEDED(IDXGIOutput_FindClosestMatchingMode(output, modeDescription, swapChainDescription, device)))
+				{
+					IDXGIOutput_Release(output);
+					IDXGIAdapter1_Release(pAdapter);
+					return;
+				}
+			}
+			IDXGIOutput_Release(output);
+		}
+		IDXGIAdapter1_Release(pAdapter);
+	}
+}
+
 static void D3D11_PLATFORM_CreateSwapChain(
 	D3D11Renderer *renderer,
 	FNA3D_PresentationParameters *pp
 ) {
-	IDXGIOutput *output;
 	IDXGIFactory1* pParent;
 	DXGI_SWAP_CHAIN_DESC swapchainDesc;
 	DXGI_MODE_DESC swapchainBufferDesc;
 	SDL_SysWMinfo info;
 	HWND dxgiHandle;
 	HRESULT res;
+
 
 	SDL_VERSION(&info.version);
 	SDL_GetWindowWMInfo((SDL_Window*) pp->deviceWindowHandle, &info);
@@ -5415,17 +5452,7 @@ static void D3D11_PLATFORM_CreateSwapChain(
 	swapchainBufferDesc.ScanlineOrdering = DXGI_MODE_SCANLINE_ORDER_UNSPECIFIED;
 	swapchainBufferDesc.Scaling = DXGI_MODE_SCALING_UNSPECIFIED;
 
-	IDXGIAdapter_EnumOutputs(
-		(IDXGIAdapter*) renderer->adapter,
-		0,
-		&output
-	);
-	IDXGIOutput_FindClosestMatchingMode(
-		output,
-		&swapchainBufferDesc,
-		&swapchainDesc.BufferDesc,
-		(IUnknown*) renderer->device
-	);
+	ResolveSwapChainModeDescription((IUnknown*) renderer->device, (IDXGIAdapter*) renderer->adapter, (IDXGIFactory1*) renderer->factory, dxgiHandle, &swapchainBufferDesc, &swapchainDesc.BufferDesc);
 
 	/* Initialize the swapchain descriptor */
 	swapchainDesc.BufferDesc = swapchainBufferDesc;

@@ -5376,7 +5376,7 @@ static void D3D11_PLATFORM_GetDefaultAdapter(
 			(IDXGIFactory6*) factory6,
 			0,
 			DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,
-			&D3D_IID_IDXGIAdapter,
+			&D3D_IID_IDXGIAdapter1,
 			(void**) adapter
 		);
 	}
@@ -5396,7 +5396,7 @@ static void ResolveSwapChainModeDescription(
 	IDXGIFactory1 *factory,
 	HWND window,
 	DXGI_MODE_DESC* modeDescription,
-	DXGI_SWAP_CHAIN_DESC* swapChainDescription
+	DXGI_MODE_DESC* swapChainDescription
 ) {
 	HMONITOR monitor;
 	int iAdapter, iOutput;

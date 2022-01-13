@@ -227,6 +227,7 @@ typedef struct D3D11Renderer /* Cast FNA3D_Renderer* to this! */
 	uint8_t debugMode;
 	uint32_t supportsDxt1;
 	uint32_t supportsS3tc;
+	uint32_t supportsBc7;
 	uint8_t supportsSRGBRenderTarget;
 	int32_t maxMultiSampleCount;
 	D3D_FEATURE_LEVEL featureLevel;
@@ -310,6 +311,8 @@ static DXGI_FORMAT XNAToD3D_TextureFormat[] =
 	DXGI_FORMAT_B8G8R8A8_UNORM,	/* SurfaceFormat.ColorBgraEXT */
 	DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,/* SurfaceFormat.ColorSrgbEXT */
 	DXGI_FORMAT_BC3_UNORM_SRGB,	/* SurfaceFormat.Dxt5SrgbEXT */
+	DXGI_FORMAT_BC7_UNORM, /* SurfaceFormat.BC7EXT */
+	DXGI_FORMAT_BC7_UNORM_SRGB,	/* SurfaceFormat.BC7SrgbEXT */
 };
 
 static DXGI_FORMAT XNAToD3D_DepthFormat[] =
@@ -860,7 +863,8 @@ static ID3D11InputLayout* D3D11_INTERNAL_FetchBindingsInputLayout(
 	int32_t numBindings,
 	uint32_t *hash
 ) {
-	int32_t numElements, i, j, k, usage, index, attribLoc, bindingsIndex;
+	int32_t numElements, i, j, k, index, attribLoc, bindingsIndex;
+	FNA3D_VertexElementUsage usage;
 	uint8_t attrUse[MOJOSHADER_USAGE_TOTAL][16];
 	D3D11_INPUT_ELEMENT_DESC elements[16]; /* D3DCAPS9 MaxStreams <= 16 */
 	D3D11_INPUT_ELEMENT_DESC *d3dElement;
@@ -2480,6 +2484,8 @@ static void D3D11_INTERNAL_CreateBackbuffer(
 	D3D11_DEPTH_STENCIL_VIEW_DESC depthStencilViewDesc;
 	D3D11_RENDER_TARGET_VIEW_DESC swapchainViewDesc;
 	ID3D11Texture2D *swapchainTexture;
+	FNA3D_SurfaceFormat actualFnaFormat = parameters->backBufferFormat;
+	DXGI_FORMAT actualDxgiFormat = XNAToD3D_TextureFormat[actualFnaFormat];
 
 	/* Dispose of the existing backbuffer in preparation for the new one. */
 	if (renderer->backbuffer != NULL)
@@ -2497,9 +2503,6 @@ static void D3D11_INTERNAL_CreateBackbuffer(
 				drawY != parameters->backBufferHeight	);
 	useFauxBackbuffer = (	useFauxBackbuffer ||
 				parameters->multiSampleCount > 0	);
-
-	FNA3D_SurfaceFormat actualFnaFormat = parameters->backBufferFormat;
-	DXGI_FORMAT actualDxgiFormat = XNAToD3D_TextureFormat[actualFnaFormat];
 
 	if ((actualDxgiFormat == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB) && !renderer->supportsSRGBRenderTarget)
 	{
@@ -4600,6 +4603,12 @@ static uint8_t D3D11_SupportsS3TC(FNA3D_Renderer *driverData)
 	return renderer->supportsS3tc;
 }
 
+static uint8_t D3D11_SupportsBC7(FNA3D_Renderer *driverData)
+{
+	D3D11Renderer *renderer = (D3D11Renderer*) driverData;
+	return renderer->supportsBc7;
+}
+
 static uint8_t D3D11_SupportsHardwareInstancing(FNA3D_Renderer *driverData)
 {
 	return 1;
@@ -4615,6 +4624,7 @@ static uint8_t D3D11_SupportsSRGBRenderTargets(FNA3D_Renderer *driverData)
 	D3D11Renderer *renderer = (D3D11Renderer*) driverData;
 	return renderer->supportsSRGBRenderTarget;
 }
+
 static void D3D11_GetMaxTextureSlots(
 	FNA3D_Renderer *driverData,
 	int32_t *textures,
@@ -5061,6 +5071,11 @@ try_create_device:
 		XNAToD3D_TextureFormat[FNA3D_SURFACEFORMAT_DXT5],
 		&supportsDxt5
 	);
+	ID3D11Device_CheckFormatSupport(
+		renderer->device,
+		XNAToD3D_TextureFormat[FNA3D_SURFACEFORMAT_BC7_EXT],
+		&renderer->supportsBc7
+	);
 	renderer->supportsS3tc = (supportsDxt3 || supportsDxt5);
 	ID3D11Device_CheckFormatSupport(
 		renderer->device,
@@ -5348,11 +5363,31 @@ static void D3D11_PLATFORM_GetDefaultAdapter(
 	void* factory,
 	IDXGIAdapter1 **adapter
 ) {
-	IDXGIFactory1_EnumAdapters1(
+	void* factory6;
+	HRESULT res;
+	res = IDXGIFactory1_QueryInterface(
 		(IDXGIFactory1*) factory,
-		0,
-		adapter
+		&D3D_IID_IDXGIFactory6,
+		(void**) &factory6
 	);
+	if (SUCCEEDED(res)) 
+	{
+		IDXGIFactory6_EnumAdapterByGpuPreference(
+			(IDXGIFactory6*) factory6,
+			0,
+			DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,
+			&D3D_IID_IDXGIAdapter,
+			(void**) adapter
+		);
+	}
+	else 
+	{
+		IDXGIFactory1_EnumAdapters1(
+			(IDXGIFactory1*) factory,
+			0,
+			adapter
+		);
+	}
 }
 
 static void D3D11_PLATFORM_CreateSwapChain(

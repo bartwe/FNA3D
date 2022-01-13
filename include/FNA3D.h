@@ -134,7 +134,9 @@ typedef enum FNA3D_SurfaceFormat
 	FNA3D_SURFACEFORMAT_HDRBLENDABLE,
 	FNA3D_SURFACEFORMAT_COLORBGRA_EXT,
 	FNA3D_SURFACEFORMAT_COLORSRGB_EXT,
-	FNA3D_SURFACEFORMAT_DXT5SRGB_EXT
+	FNA3D_SURFACEFORMAT_DXT5SRGB_EXT,
+	FNA3D_SURFACEFORMAT_BC7_EXT,
+	FNA3D_SURFACEFORMAT_BC7SRGB_EXT,
 } FNA3D_SurfaceFormat;
 
 typedef enum FNA3D_DepthFormat
@@ -460,8 +462,8 @@ typedef struct FNA3D_RenderTargetBinding
 /* Version API */
 
 #define FNA3D_ABI_VERSION	 0
-#define FNA3D_MAJOR_VERSION	21
-#define FNA3D_MINOR_VERSION	12
+#define FNA3D_MAJOR_VERSION	22
+#define FNA3D_MINOR_VERSION	 1
 #define FNA3D_PATCH_VERSION	 0
 
 #define FNA3D_COMPILED_VERSION ( \
@@ -1473,6 +1475,9 @@ FNA3DAPI uint8_t FNA3D_SupportsDXT1(FNA3D_Device *device);
 
 /* Returns 1 if the renderer natively supports S3TC texture data. */
 FNA3DAPI uint8_t FNA3D_SupportsS3TC(FNA3D_Device *device);
+
+/* Returns 1 if the renderer natively supports BC7 texture data. */
+FNA3DAPI uint8_t FNA3D_SupportsBC7(FNA3D_Device *device);
 
 /* Returns 1 if the renderer natively supports hardware instancing. */
 FNA3DAPI uint8_t FNA3D_SupportsHardwareInstancing(FNA3D_Device *device);

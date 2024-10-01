@@ -66,11 +66,12 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
-      <PreprocessorDefinitions>FNA3D_DRIVER_OPENGL;FNA3D_DRIVER_D3D11;FNA3D_DRIVER_VULKAN;MOJOSHADER_NO_VERSION_INCLUDE;MOJOSHADER_USE_SDL_STDLIB;MOJOSHADER_EFFECT_SUPPORT;MOJOSHADER_DEPTH_CLIPPING;MOJOSHADER_FLIP_RENDERTARGET;MOJOSHADER_XNA4_VERTEX_TEXTURES;SUPPORT_PROFILE_ARB1=0;SUPPORT_PROFILE_ARB1_NV=0;SUPPORT_PROFILE_BYTECODE=0;SUPPORT_PROFILE_D3D=0;SUPPORT_PROFILE_METAL=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>FNA3D_DRIVER_SDL;USE_SDL3;FNA3D_DRIVER_OPENGL;FNA3D_DRIVER_D3D11;FNA3D_DRIVER_VULKAN;MOJOSHADER_NO_VERSION_INCLUDE;MOJOSHADER_USE_SDL_STDLIB;MOJOSHADER_EFFECT_SUPPORT;MOJOSHADER_DEPTH_CLIPPING;MOJOSHADER_FLIP_RENDERTARGET;MOJOSHADER_XNA4_VERTEX_TEXTURES;SUPPORT_PROFILE_ARB1=0;SUPPORT_PROFILE_ARB1_NV=0;SUPPORT_PROFILE_BYTECODE=0;SUPPORT_PROFILE_D3D=0;SUPPORT_PROFILE_METAL=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">stdcpp20</LanguageStandard>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>SDL2.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>SDL3.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Release'">

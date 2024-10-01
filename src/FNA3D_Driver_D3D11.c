@@ -33,6 +33,9 @@
 
 #ifdef USE_SDL3
 #include <SDL3/SDL.h>
+
+#undef SDL_FALSE
+#define SDL_FALSE false
 #else
 #include <SDL.h>
 #ifndef FNA3D_DXVK_NATIVE
@@ -5196,7 +5199,7 @@ static uint8_t D3D11_PrepareWindowAttributes(uint32_t *flags)
 		return 0;
 	}
 #ifdef USE_SDL3
-	SDL_setenv("DXVK_WSI_DRIVER", "SDL3", 1);
+	SDL_setenv_unsafe("DXVK_WSI_DRIVER", "SDL3", 1);
 #else
 	SDL_setenv("DXVK_WSI_DRIVER", "SDL2", 1);
 #endif

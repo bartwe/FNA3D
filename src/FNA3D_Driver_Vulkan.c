@@ -40,6 +40,9 @@
 #ifdef USE_SDL3
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
+
+#undef SDL_FALSE
+#define SDL_FALSE false
 #else
 #include <SDL.h>
 #include <SDL_vulkan.h>
@@ -57,6 +60,8 @@
 #define SDL_CloseIO(file) file->close(file)
 #define SDL_CreateWindow(title, w, h, flags) SDL_CreateWindow(title, 0, 0, w, h, flags)
 #define SDL_Vulkan_CreateSurface(windowHandle, instance, callbacks, surface) SDL_Vulkan_CreateSurface(windowHandle, instance, surface)
+#define SDL_GetAtomicInt SDL_AtomicGet
+#define SDL_SetAtomicInt SDL_AtomicSet
 #endif
 
 #define VULKAN_INTERNAL_clamp(val, min, max) SDL_max(min, SDL_min(val, max))
@@ -3365,7 +3370,7 @@ static VulkanBuffer* VULKAN_INTERNAL_CreateBuffer(
 	buffer->usage = usage | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 	buffer->preferDeviceLocal = preferDeviceLocal;
 	buffer->isTransferBuffer = isTransferBuffer;
-	SDL_AtomicSet(&buffer->refcount, 0);
+	SDL_SetAtomicInt(&buffer->refcount, 0);
 
 	bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
 	bufferCreateInfo.pNext = NULL;
@@ -5335,7 +5340,7 @@ static void VULKAN_INTERNAL_SetBufferData(
 	}
 	else
 	{
-		if (options == FNA3D_SETDATAOPTIONS_DISCARD && SDL_AtomicGet(&vulkanBuffer->refcount) > 0)
+		if (options == FNA3D_SETDATAOPTIONS_DISCARD && SDL_GetAtomicInt(&vulkanBuffer->refcount) > 0)
 		{
 			/* If DISCARD is set and the buffer was bound,
 			 * we have to replace the buffer pointer.
@@ -10814,7 +10819,7 @@ static uint8_t VULKAN_Memory_BufferHandleInUse(
 	FNA3D_BufferHandle *buffer
 ) {
 	VulkanBuffer *vulkanBuffer = (VulkanBuffer*) buffer;
-	return SDL_AtomicGet(&vulkanBuffer->refcount) > 0;
+	return SDL_GetAtomicInt(&vulkanBuffer->refcount) > 0;
 }
 
 /* Command Buffer Driver */
@@ -11114,10 +11119,19 @@ static uint8_t VULKAN_PrepareWindowAttributes(uint32_t *flags)
 	uint8_t result;
 
 	/* Required for MoltenVK support */
+#ifdef USE_SDL3
+	SDL_setenv_unsafe("MVK_CONFIG_FULL_IMAGE_VIEW_SWIZZLE", "1", 1);
+	SDL_setenv_unsafe("MVK_CONFIG_SHADER_CONVERSION_FLIP_VERTEX_Y", "0", 1);
+#else
 	SDL_setenv("MVK_CONFIG_FULL_IMAGE_VIEW_SWIZZLE", "1", 1);
 	SDL_setenv("MVK_CONFIG_SHADER_CONVERSION_FLIP_VERTEX_Y", "0", 1);
+#endif
 
+#ifdef USE_SDL3
+	if (!SDL_Vulkan_LoadLibrary(NULL))
+#else
 	if (SDL_Vulkan_LoadLibrary(NULL) < 0)
+#endif
 	{
 		FNA3D_LogWarn("Vulkan: SDL_Vulkan_LoadLibrary failed!");
 		return 0;

@@ -1725,19 +1725,26 @@ static void SDLGPU_VerifyVertexSampler(
 	{
 		renderer->vertexTextureSamplerBindings[index].sampler = renderer->dummySampler;
 
-		samplerType = MOJOSHADER_sdlGetShaderParseData(vertShader)->samplers[index].type;
+		if (vertShader)
+		{
+			samplerType = MOJOSHADER_sdlGetShaderParseData(vertShader)->samplers[index].type;
 
-		if (samplerType == MOJOSHADER_SAMPLER_2D)
-		{
-			renderer->vertexTextureSamplerBindings[index].texture = renderer->dummyTexture2D;
-		}
-		else if (samplerType == MOJOSHADER_SAMPLER_VOLUME)
-		{
-			renderer->vertexTextureSamplerBindings[index].texture = renderer->dummyTexture3D;
+			if (samplerType == MOJOSHADER_SAMPLER_2D)
+			{
+				renderer->vertexTextureSamplerBindings[index].texture = renderer->dummyTexture2D;
+			}
+			else if (samplerType == MOJOSHADER_SAMPLER_VOLUME)
+			{
+				renderer->vertexTextureSamplerBindings[index].texture = renderer->dummyTexture3D;
+			}
+			else
+			{
+				renderer->vertexTextureSamplerBindings[index].texture = renderer->dummyTextureCube;
+			}
 		}
 		else
 		{
-			renderer->vertexTextureSamplerBindings[index].texture = renderer->dummyTextureCube;
+			renderer->vertexTextureSamplerBindings[index].texture = renderer->dummyTexture2D;
 		}
 
 		return;
@@ -1780,18 +1787,25 @@ static void SDLGPU_VerifySampler(
 	{
 		renderer->fragmentTextureSamplerBindings[index].sampler = renderer->dummySampler;
 
-		samplerType = MOJOSHADER_sdlGetShaderParseData(fragShader)->samplers[index].type;
-		if (samplerType == MOJOSHADER_SAMPLER_2D)
+		if (fragShader)
 		{
-			renderer->fragmentTextureSamplerBindings[index].texture = renderer->dummyTexture2D;
-		}
-		else if (samplerType == MOJOSHADER_SAMPLER_VOLUME)
-		{
-			renderer->fragmentTextureSamplerBindings[index].texture = renderer->dummyTexture3D;
+			samplerType = MOJOSHADER_sdlGetShaderParseData(fragShader)->samplers[index].type;
+			if (samplerType == MOJOSHADER_SAMPLER_2D)
+			{
+				renderer->fragmentTextureSamplerBindings[index].texture = renderer->dummyTexture2D;
+			}
+			else if (samplerType == MOJOSHADER_SAMPLER_VOLUME)
+			{
+				renderer->fragmentTextureSamplerBindings[index].texture = renderer->dummyTexture3D;
+			}
+			else
+			{
+				renderer->fragmentTextureSamplerBindings[index].texture = renderer->dummyTextureCube;
+			}
 		}
 		else
 		{
-			renderer->fragmentTextureSamplerBindings[index].texture = renderer->dummyTextureCube;
+			renderer->fragmentTextureSamplerBindings[index].texture = renderer->dummyTexture2D;
 		}
 
 		return;
@@ -3895,6 +3909,7 @@ static void SDLGPU_GetSysRenderer(
 ) {
 	/* TODO */
 	SDL_memset(sysrenderer, '\0', sizeof(FNA3D_SysRendererEXT));
+	sysrenderer->rendererType = FNA3D_RENDERER_TYPE_SDL_GPU_EXT;
 }
 
 static FNA3D_Texture* SDLGPU_CreateSysTexture(
@@ -3912,7 +3927,11 @@ static void SDLGPU_DestroyDevice(FNA3D_Device *device)
 	SDLGPU_Renderer *renderer = (SDLGPU_Renderer*) device->driverData;
 	int32_t i, j;
 
-	SDLGPU_INTERNAL_FlushCommandsAndStall(renderer);
+	// Completely flush command buffers and stall
+	SDLGPU_INTERNAL_FlushCommands(renderer);
+	SDL_SubmitGPUCommandBuffer(renderer->uploadCommandBuffer);
+	SDL_SubmitGPUCommandBuffer(renderer->renderCommandBuffer);
+	SDL_WaitForGPUIdle(renderer->device);
 
 	if (renderer->textureDownloadBuffer != NULL)
 	{

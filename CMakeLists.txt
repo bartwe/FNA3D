@@ -7,11 +7,12 @@ project(FNA3D C)
 option(BUILD_SHARED_LIBS "Build shared library" ON)
 option(TRACING_SUPPORT "Build with tracing enabled" OFF)
 option(BUILD_SDL3 "Build against SDL 3.0" OFF)
+option(MOJOSHADER_STATIC_SPIRVCROSS "Build against statically linked spirvcross" OFF)
 
 # Version
 SET(LIB_MAJOR_VERSION "0")
 SET(LIB_MINOR_VERSION "24")
-SET(LIB_REVISION "10")
+SET(LIB_REVISION "11")
 SET(LIB_VERSION "${LIB_MAJOR_VERSION}.${LIB_MINOR_VERSION}.${LIB_REVISION}")
 
 # Build Type
@@ -65,13 +66,15 @@ add_definitions(
 	-DSUPPORT_PROFILE_ARB1_NV=0
 	-DSUPPORT_PROFILE_BYTECODE=0
 	-DSUPPORT_PROFILE_D3D=0
-	-DSUPPORT_PROFILE_METAL=0
 )
 if(TRACING_SUPPORT)
 	add_definitions(-DFNA3D_TRACING)
 endif()
 if(BUILD_SDL3)
 	add_definitions(-DUSE_SDL3)
+endif()
+if (MOJOSHADER_STATIC_SPIRVCROSS)
+	add_definitions(-DSDL_GPU_SHADERCROSS_STATIC)
 endif()
 
 if(WIN32 OR BUILD_DXVK_NATIVE)
@@ -91,6 +94,12 @@ if(EMSCRIPTEN)
 	add_definitions(
 		-DSUPPORT_PROFILE_GLSPIRV=0
 		-DSUPPORT_PROFILE_SPIRV=0
+	)
+endif()
+
+if(NOT APPLE)
+	add_definitions(
+		-DSUPPORT_PROFILE_METAL=0
 	)
 endif()
 
@@ -131,6 +140,7 @@ add_library(mojoshader STATIC
 	MojoShader/profiles/mojoshader_profile_glsl.c
 	MojoShader/profiles/mojoshader_profile_hlsl.c
 	MojoShader/profiles/mojoshader_profile_spirv.c
+	MojoShader/profiles/mojoshader_profile_metal.c
 )
 if(TRACING_SUPPORT)
 	add_executable(fna3d_replay replay/replay.c)

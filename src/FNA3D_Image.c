@@ -53,9 +53,8 @@
 		0x00FF0000, \
 		(c == SDL_PIXELFORMAT_RGBA32) ? 0xFF000000 : 0 \
 	)
-#define SDL_BlitSurfaceScaled(a, b, c, d, e) SDL_BlitScaled(a, b, c, d)
+#define SDL_BlitSurfaceScaled(a, b, c, d, e) (SDL_BlitScaled(a, b, c, d) == 0)
 #define SDL_DestroySurface SDL_FreeSurface
-#define SDL_SURFACE_PREALLOCATED SDL_PREALLOC
 #endif
 
 extern void FNA3D_LogWarn(const char *fmt, ...);
@@ -190,15 +189,17 @@ uint8_t* FNA3D_Image_Load(
 	uint8_t zoom
 ) {
 	uint8_t *result;
-	uint8_t *pixels;
+	uint8_t *pixels = NULL;
 	int32_t format;
 	float scale;
 	SDL_Rect crop;
 	uint8_t scaleWidth;
-	SDL_Surface *surface, *newSurface;
+	SDL_Surface *surface = NULL, *newSurface = NULL;
 	stbi_io_callbacks cb;
 	int32_t i;
+	size_t imageSize;
 
+	*len = 0;
 	cb.read = readFunc;
 	cb.skip = skipFunc;
 	cb.eof = eofFunc;
@@ -214,10 +215,27 @@ uint8_t* FNA3D_Image_Load(
 	if (result == NULL)
 	{
 		FNA3D_LogWarn("Image loading failed: %s", stbi_failure_reason());
+		return NULL;
 	}
 
-	if (forceW != -1 && forceH != -1)
+	if (	*w <= 0 || *h <= 0 ||
+		*w > SDL_MAX_SINT32 / 4 / *h	)
 	{
+		SDL_SetError("Image dimensions exceed the supported size");
+		goto load_failed;
+	}
+
+	if (	forceW != -1 && forceH != -1 &&
+		(forceW != *w || forceH != *h)	)
+	{
+		if (	forceW <= 0 || forceH <= 0 ||
+			forceW > SDL_MAX_SINT32 / 4 ||
+			forceH > SDL_MAX_SINT32 / 4	)
+		{
+			SDL_SetError("Invalid requested image dimensions");
+			goto load_failed;
+		}
+
 		surface = SDL_CreateSurfaceFrom(
 			*w,
 			*h,
@@ -225,6 +243,10 @@ uint8_t* FNA3D_Image_Load(
 			result,
 			(*w) * 4
 		);
+		if (surface == NULL)
+		{
+			goto load_failed;
+		}
 #if SDL_MAJOR_VERSION < 3
 		surface->flags |= SDL_SIMD_ALIGNED;
 #endif
@@ -272,40 +294,48 @@ uint8_t* FNA3D_Image_Load(
 			*h = (int) (surface->h * scale);
 		}
 
-		/* Alloc surface, blit! */
-		newSurface = SDL_CreateSurface(
+		if (	*w <= 0 || *h <= 0 ||
+			*w > SDL_MAX_SINT32 / 4 / *h	)
+		{
+			SDL_SetError("Resized image dimensions exceed the supported size");
+			goto load_failed;
+		}
+
+		/* The destination pixels must use the Image_Free allocator. */
+		imageSize = (size_t) *w * *h * 4;
+		pixels = (uint8_t*) STBI_MALLOC(imageSize);
+		if (pixels == NULL)
+		{
+			SDL_OutOfMemory();
+			goto load_failed;
+		}
+		SDL_memset(pixels, 0, imageSize);
+		newSurface = SDL_CreateSurfaceFrom(
 			*w,
 			*h,
-			SDL_PIXELFORMAT_RGBA32
+			SDL_PIXELFORMAT_RGBA32,
+			pixels,
+			(*w) * 4
 		);
-		SDL_SetSurfaceBlendMode(surface, SDL_BLENDMODE_NONE);
-		if (zoom)
+		if (newSurface == NULL)
 		{
-			SDL_BlitSurfaceScaled(
-				surface,
-				&crop,
-				newSurface,
-				NULL,
-				SDL_SCALEMODE_LINEAR /* FIXME: is this correct */
-			);
+			goto load_failed;
 		}
-		else
+		SDL_SetSurfaceBlendMode(surface, SDL_BLENDMODE_NONE);
+		if (!SDL_BlitSurfaceScaled(
+			surface,
+			zoom ? &crop : NULL,
+			newSurface,
+			NULL,
+			SDL_SCALEMODE_LINEAR /* FIXME: is this correct */
+		))
 		{
-			SDL_BlitSurfaceScaled(
-				surface,
-				NULL,
-				newSurface,
-				NULL,
-				SDL_SCALEMODE_LINEAR /* FIXME: is this correct */
-			);
+			goto load_failed;
 		}
 		SDL_DestroySurface(surface);
-		SDL_free(result);
-
-		/* We're going to cheat and let the client take the memory! */
-		result = (uint8_t*) newSurface->pixels;
-		newSurface->flags |= SDL_SURFACE_PREALLOCATED;
 		SDL_DestroySurface(newSurface);
+		STBI_FREE(result);
+		result = pixels;
 	}
 
 	/* Ensure that the alpha pixels are... well, actual alpha.
@@ -326,6 +356,14 @@ uint8_t* FNA3D_Image_Load(
 	}
 
 	return result;
+
+load_failed:
+	FNA3D_LogWarn("Image loading failed: %s", SDL_GetError());
+	SDL_DestroySurface(surface);
+	SDL_DestroySurface(newSurface);
+	STBI_FREE(pixels);
+	STBI_FREE(result);
+	return NULL;
 }
 
 void FNA3D_Image_Free(uint8_t *mem)

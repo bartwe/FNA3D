@@ -59,15 +59,19 @@
     <LibraryPath>$(SolutionDir)Libraries\FNA;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <OutDir>$(SolutionDir)Libraries\FNA\</OutDir>
+    <OutDir>$(SolutionDir)\Staxel.Client.DotNet\bin\Debug\</OutDir>
     <IntDir>$(SolutionDir)FNA\lib\FNA3d\obj\</IntDir>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
-      <Optimization>Disabled</Optimization>
+      <Optimization>MaxSpeed</Optimization>
       <PreprocessorDefinitions>FNA3D_DRIVER_SDL;USE_SDL3;FNA3D_DRIVER_OPENGL;FNA3D_DRIVER_D3D11;FNA3D_DRIVER_VULKAN;MOJOSHADER_NO_VERSION_INCLUDE;MOJOSHADER_USE_SDL_STDLIB;MOJOSHADER_EFFECT_SUPPORT;MOJOSHADER_DEPTH_CLIPPING;MOJOSHADER_FLIP_RENDERTARGET;MOJOSHADER_XNA4_VERTEX_TEXTURES;SUPPORT_PROFILE_ARB1=0;SUPPORT_PROFILE_ARB1_NV=0;SUPPORT_PROFILE_BYTECODE=0;SUPPORT_PROFILE_D3D=0;SUPPORT_PROFILE_METAL=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">stdcpp20</LanguageStandard>
+      <IntrinsicFunctions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</IntrinsicFunctions>
+      <WholeProgramOptimization Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</WholeProgramOptimization>
+      <BasicRuntimeChecks Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Default</BasicRuntimeChecks>
+      <DebugInformationFormat Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">ProgramDatabase</DebugInformationFormat>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>

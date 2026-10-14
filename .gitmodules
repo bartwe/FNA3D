@@ -1,7 +1,7 @@
 [submodule "MojoShader"]
 	path = MojoShader
-	url = https://github.com/icculus/mojoshader
-	branch = main
+	url = https://github.com/bartwe/MojoShader.git
+	branch = codex/staxel-cpp-compat
 [submodule "Vulkan-Headers"]
 	path = Vulkan-Headers
 	url = https://github.com/KhronosGroup/Vulkan-Headers
